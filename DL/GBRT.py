@@ -7,14 +7,14 @@ import os
 import sys
 import time
 
-sys.path.append('./DL_LIB/sPOD_DL_ROM/')
+sys.path.append('../DL-ROM/LIB/')
 
 import Utilities
 
 
 def scale_params(PARAMS_TEST, scaling):
 
-    # Reading the scaling factors for the testing data
+    # Reading the scaling factors for the testing wildfire_data
     snapshot_max = scaling[0]
     snapshot_min = scaling[1]
     delta_max = scaling[2]
@@ -63,7 +63,7 @@ def scale_data(TA_TRAIN, params_train, params):
 
 def test_model(TA_TEST, params_test, trained_model_list=None, scaling=None, params=None):
 
-    # Reading the scaling factors for the testing data
+    # Reading the scaling factors for the testing wildfire_data
     snapshot_max = scaling[0]
     snapshot_min = scaling[1]
     delta_max = scaling[2]
@@ -102,7 +102,7 @@ def run_model(TA_TRAIN, params_train, params):
 
     TA_TRAIN, params_train, scaling = scale_data(TA_TRAIN, params_train, params)
 
-    # prepare the data
+    # prepare the wildfire_data
     X_train, X_val, y_train, y_val = train_test_split(np.transpose(params_train), np.transpose(TA_TRAIN))
 
     regressor_list = []

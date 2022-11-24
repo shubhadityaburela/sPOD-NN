@@ -8,13 +8,13 @@ from random import randint
 from Helper import *
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
-impath = "./plots/images_WildLandFire/"
+impath = "../plots/images_wildfire1D/"
 os.makedirs(impath, exist_ok=True)
 
-data_path = os.path.abspath("..") + '/data/'
+data_path = os.path.abspath(".") + '/wildfire_data/'
 
 
-class WildLandFire:
+class wildfire1D:
     def __init__(self, spod_iter, var):
         # dat1_train = np.load(data_path + 'SnapShotMatrix540.npy')
         # dat2_train = np.load(data_path + 'SnapShotMatrix560.npy')
@@ -61,7 +61,7 @@ class WildLandFire:
         delta8_train = np.load(data_path + 'Shifts575.npy')
         delta9_train = np.load(data_path + 'Shifts580.npy')
 
-        # Trimming the data to half
+        # Trimming the wildfire_data to half
         self.t = self.t[:len(self.t) // 2]
         self.Nt = np.size(self.t)
         dat1_train = dat1_train[:, :self.Nt]
@@ -131,14 +131,14 @@ class WildLandFire:
         sPOD_frames_train, qtilde_train, rel_err_train = ret_train.frames, ret_train.data_approx, ret_train.rel_err_hist
 
         ###########################################
-        # %% relative offline error for training data (srPCA error)
+        # %% relative offline error for training wildfire_data (srPCA error)
         err_full = np.sqrt(np.mean(np.linalg.norm(q_train - qtilde_train, 2, axis=1) ** 2)) / \
                      np.sqrt(np.mean(np.linalg.norm(q_train, 2, axis=1) ** 2))
         print("Check 1...")
         print("Error for full sPOD recons: {}".format(err_full))
 
         ###########################################
-        # %% Calculate the time amplitudes for training data
+        # %% Calculate the time amplitudes for training wildfire_data
         self.U_list = []
         self.spodModes = []
         self.frame_amplitude_list = []
@@ -164,13 +164,13 @@ class WildLandFire:
         q3_spod_frame = sPOD_frames_train[2].build_field()
 
         ###########################################
-        # %% Generate data for the POD-DL-ROM for comparison
+        # %% Generate wildfire_data for the POD-DL-ROM for comparison
         U, S, VT = np.linalg.svd(np.squeeze(q_train), full_matrices=False)
         self.U_POD_TRAIN = U[:, :sum(self.spodModes) + 2]
         self.TA_POD_TRAIN = np.diag(S[:sum(self.spodModes) + 2]) @ VT[:sum(self.spodModes) + 2, :]
 
         ###########################################
-        # %% data for the NN
+        # %% wildfire_data for the NN
         amplitudes_train = np.concatenate(frame_amplitude_list_training, axis=0)
         self.TA_TRAIN = amplitudes_train
         self.SHIFTS_TRAIN = [shifts_train[0], shifts_train[2]]
@@ -184,7 +184,7 @@ class WildLandFire:
         plot_timeamplitudesTraining(frame_amplitude_list_training, self.x, self.t, Nm=2)
 
 
-def WildLandFire_testing(Q, delta, U_list, U_POD_TRAIN, x, t, val, var, spod_iter):
+def wildfire1D_testing(Q, delta, U_list, U_POD_TRAIN, x, t, val, var, spod_iter):
     Nx = len(x)
     Nt = len(t)
 
@@ -255,7 +255,7 @@ def onlineErroranalysis(frame_amplitude_predicted, TA_TEST, TA_POD_TEST, frame_a
                         q_test, q1_test, q2_test, q3_test, mu_vecs_train, mu_vecs_test, x, t):
     print("#############################################")
     print('Online Error checks')
-    # %% Online error with respect to testing data
+    # %% Online error with respect to testing wildfire_data
     Nx = len(x)
     Nt = len(t)
     dx = x[1] - x[0]
@@ -398,7 +398,7 @@ def onlineErroranalysis(frame_amplitude_predicted, TA_TEST, TA_POD_TEST, frame_a
     print("Relative reconstruction error indicator for full snapshot(POD-DL-ROM) is {}".format(num2 / den2))
     print("Relative reconstruction error indicator for full snapshot(interpolated) is {}".format(num1_i / den1_i))
 
-    # Plot the online prediction data
+    # Plot the online prediction wildfire_data
     Nm = 2
     plot_timeamplitudesPred(time_amplitudes_1_pred, time_amplitudes_1_test, time_amplitudes_2_pred,
                             time_amplitudes_2_test, time_amplitudes_3_pred, time_amplitudes_3_test,

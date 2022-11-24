@@ -4,11 +4,11 @@ import os
 import sys
 from Helper import *
 
-impath = "./plots/images_combustionWaveTA/"
+impath = "../plots/images_syntheticOnlyTA/"
 os.makedirs(impath, exist_ok=True)
 
 
-class CombustionWaveTA:
+class syntheticOnlyTA:
     def __init__(self):
         self.Nx = 500
         self.Nt = 500  # numer of time intervals
@@ -28,13 +28,13 @@ class CombustionWaveTA:
         self.Tgrid = self.Tgrid.T
 
         ##########################################
-        # %% Create training data
+        # %% Create training wildfire_data
         mu_vecs_train = np.asarray([4, 5, 6])
         Nsamples_train = np.size(mu_vecs_train)
         amplitudes_train, shifts_train, params_train = self.create_data(mu_vecs_train)
 
         ##########################################
-        # %% Create testing data
+        # %% Create testing wildfire_data
         mu_vecs_test = np.asarray([5.5])
         Nsamples_test = np.size(mu_vecs_test)
         self.amplitudes_test, self.shifts_test, self.params_test = self.create_data(mu_vecs_test)
@@ -82,7 +82,7 @@ class CombustionWaveTA:
                 self.nmodes, num4 / den4))
 
         ###########################################
-        # %% data for the NN
+        # %% wildfire_data for the NN
         self.TA_TRAIN = amplitudes_train
         self.SHIFTS_TRAIN = [shifts_train[0], shifts_train[1]]
         self.PARAMS_TRAIN = params_train
@@ -120,7 +120,7 @@ class CombustionWaveTA:
         print("#############################################")
         print('Online Error checks')
         ###########################################
-        # %% Online error with respect to testing data
+        # %% Online error with respect to testing wildfire_data
         time_amplitudes_1_pred = frame_amplitude_predicted[:self.D, :]
         time_amplitudes_2_pred = frame_amplitude_predicted[self.D:2 * self.D, :]
         shifts_1_pred = shifts_predicted[0, :]
@@ -146,7 +146,7 @@ class CombustionWaveTA:
         print("Relative error indicator for shift: 1 is {}".format(num1 / den1))
         print("Relative error indicator for shift: 2 is {}".format(num2 / den2))
 
-        # Plot the online prediction data
+        # Plot the online prediction wildfire_data
         self.plot_timeamplitudesPred(time_amplitudes_1_pred, time_amplitudes_1_test, time_amplitudes_2_pred,
                                      time_amplitudes_2_test)
         self.plot_shiftsPred(shifts_1_pred, shifts_2_pred)

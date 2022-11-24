@@ -10,7 +10,7 @@ from numpy.linalg import norm
 import math
 
 
-sys.path.append('sPOD/lib')
+sys.path.append('../sPOD/lib/')
 from sPOD_tools import shifted_rPCA, shifted_POD, give_interpolation_error, build_all_frames
 from transforms import transforms
 from farge_colormaps import farge_colormap_multi

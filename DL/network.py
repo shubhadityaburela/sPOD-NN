@@ -22,7 +22,7 @@ import os
 import time
 
 
-sys.path.append('./DL_LIB/sPOD_DL_ROM/')
+sys.path.append('../DL-ROM/LIB/')
 
 import Utilities
 
@@ -32,7 +32,7 @@ import matplotlib.pyplot as plt
 def scale_params(PARAMS_TEST, params, scaling):
 
     if params['scaling']:
-        # Reading the scaling factors for the testing data
+        # Reading the scaling factors for the testing wildfire_data
         snapshot_max = scaling[0]
         snapshot_min = scaling[1]
         delta_max = scaling[2]
@@ -156,7 +156,7 @@ def prepare_data(ta_train, p_train, n_outputs):
     dataset = CSVDataset(ta_train, p_train, n_outputs)
     # calculate split
     train, val = dataset.get_splits()
-    # prepare data loaders
+    # prepare wildfire_data loaders
     train_dl = DataLoader(train, batch_size=500, shuffle=True)
     val_dl = DataLoader(val, batch_size=500, shuffle=False)
     return train_dl, val_dl
@@ -241,7 +241,7 @@ def test_model(TA_TEST, params_test, trained_model=None, saved_model=True,
                PATH_TO_WEIGHTS='', params=None, scaling=None):
 
     if params['scaling']:
-        # Reading the scaling factors for the testing data
+        # Reading the scaling factors for the testing wildfire_data
         snapshot_max = scaling[0]
         snapshot_min = scaling[1]
         delta_max = scaling[2]
@@ -314,7 +314,7 @@ def run_model(TA_TRAIN, params_train, epochs, lr, loss,
     if params['scaling']:
         TA_TRAIN, params_train, scaling = scale_data(TA_TRAIN, params_train, params)
 
-    # prepare the data
+    # prepare the wildfire_data
     train_dl, val_dl = prepare_data(TA_TRAIN, params_train, numOutputs)
 
     # define the network

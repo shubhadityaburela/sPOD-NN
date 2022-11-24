@@ -3,11 +3,11 @@ from scipy.special import eval_hermite
 import os
 from Helper import *
 
-impath = "./plots/images_combustionWave/"
+impath = "../plots/images_synthetic/"
 os.makedirs(impath, exist_ok=True)
 
 
-class CombustionWave:
+class synthetic:
     def __init__(self, spod_iter):
         self.Nx = 500  # number of grid points in x
         self.Nt = 500  # numer of time intervals
@@ -31,10 +31,10 @@ class CombustionWave:
         c = 1
 
         print("#############################################")
-        print("Synthetic data checks....")
+        print("Synthetic wildfire_data checks....")
         print("Check 1...")
         ##########################################
-        # %% Create training data
+        # %% Create training wildfire_data
         mu_vecs_train = np.asarray([0.1, 0.2, 0.3])
         Nsamples_train = np.size(mu_vecs_train)
         q_train, q1_train, q2_train, shifts_train, params_train, trafos_train = self.create_data(mu_vecs_train)
@@ -53,7 +53,7 @@ class CombustionWave:
         print("Error for frame 2 SVD recons. with {} number of modes is {}".format(self.D, err2))
 
         ##########################################
-        # %% Create testing data
+        # %% Create testing wildfire_data
         mu_vecs_test = np.asarray([0.15])
         Nsamples_test = np.size(mu_vecs_test)
         self.q_test, self.q1_test, self.q2_test, self.shifts_test, self.params_test, self.trafos_test = \
@@ -77,7 +77,7 @@ class CombustionWave:
         sPOD_frames, qtilde, rel_err = ret.frames, ret.data_approx, ret.rel_err_hist
 
         ###########################################
-        # %% relative offline error for training data (srPCA error)
+        # %% relative offline error for training wildfire_data (srPCA error)
         q1_spod_frame = sPOD_frames[0].build_field()
         q2_spod_frame = sPOD_frames[1].build_field()
         err_full = np.sqrt(np.mean(np.linalg.norm(q_train - qtilde, 2, axis=1) ** 2)) / \
@@ -86,7 +86,7 @@ class CombustionWave:
         print("Error for full sPOD recons. is {}".format(err_full))
 
         ###########################################
-        # %% Calculate the time amplitudes for training data
+        # %% Calculate the time amplitudes for training wildfire_data
         self.U_list = []
         frame_amplitude_list = []
         frame_amplitude_list_training = []
@@ -134,14 +134,14 @@ class CombustionWave:
         self.plot_sPODframes(q_train, qtilde, q1_spod_frame, q2_spod_frame)
 
         ###########################################
-        # %% Generate data for the POD-DL-ROM for comparison
+        # %% Generate wildfire_data for the POD-DL-ROM for comparison
         U, S, VT = np.linalg.svd(np.squeeze(q_train), full_matrices=False)
         self.U_POD_TRAIN = U[:, :sum(Nmodes) + 2]
         self.TA_POD_TRAIN = np.diag(S[:sum(Nmodes) + 2]) @ VT[:sum(Nmodes) + 2, :]
         self.TA_POD_TEST = self.U_POD_TRAIN.transpose() @ self.q_test
 
         ###########################################
-        # %% data for the NN
+        # %% wildfire_data for the NN
         amplitudes_train = np.concatenate(frame_amplitude_list_training, axis=0)
         time_amplitudes_1_test = self.U_list[0][:, :self.D].transpose() @ self.q1_test
         time_amplitudes_2_test = self.U_list[1][:, :self.D].transpose() @ self.q2_test
@@ -212,7 +212,7 @@ class CombustionWave:
         print("#############################################")
         print('Online Error checks')
         ###########################################
-        # %% Online error with respect to testing data
+        # %% Online error with respect to testing wildfire_data
         time_amplitudes_1_pred = frame_amplitude_predicted[:self.D, :]
         time_amplitudes_2_pred = frame_amplitude_predicted[self.D:2 * self.D, :]
         shifts_1_pred = shifts_predicted[0, :]
@@ -287,7 +287,7 @@ class CombustionWave:
         print("Relative reconstruction error indicator for full snapshot(sPOD-DL-ROM) is {}".format(num1 / den1))
         print("Relative reconstruction error indicator for full snapshot(POD-DL-ROM) is {}".format(num2 / den2))
 
-        # Plot the online prediction data
+        # Plot the online prediction wildfire_data
         self.plot_timeamplitudesPred(time_amplitudes_1_pred, time_amplitudes_1_test, time_amplitudes_2_pred,
                                      time_amplitudes_2_test)
         self.plot_timeamplitudesPredPOD(POD_frame_amplitudes_predicted, nmodes=5)
@@ -320,7 +320,7 @@ class CombustionWave:
         fig.subplots_adjust(right=0.8)
         cbar_ax = fig.add_axes([0.83, 0.25, 0.01, 0.5])
         fig.colorbar(im, cax=cbar_ax)
-        fig.savefig(impath + "Combustionwaves_" + "training" + '.png', dpi=600, transparent=True)
+        fig.savefig(impath + "synthetic_" + "training" + '.png', dpi=600, transparent=True)
 
     def plot_trainingshift(self, shifts_train, mu_vecs_train):
         Nt = len(self.t)
@@ -359,7 +359,7 @@ class CombustionWave:
         axs[2].set_title(r"$\tilde{Q}" + "_{i,j}$")
         plt.tight_layout()
 
-        save_fig(filepath=impath + "Combustionwaves_spod_frames", figure=fig)
+        save_fig(filepath=impath + "synthetic_spod_frames", figure=fig)
 
     def plot_timeamplitudes(self, frame_amplitude_list_training):
         fig, axs = plt.subplots(1, self.D, sharey=True, figsize=(18, 5), num=6)
