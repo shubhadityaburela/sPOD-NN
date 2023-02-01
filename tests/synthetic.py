@@ -10,13 +10,14 @@ os.makedirs(impath, exist_ok=True)
 class synthetic:
     def __init__(self, spod_iter):
         self.Nx = 500  # number of grid points in x
+        self.Ny = 1  # number of grid points in y
         self.Nt = 500  # numer of time intervals
 
         self.NumFrames = 2
 
         self.T = 1  # total time
         self.L = 1  # total domain size
-        self.nmodes = 5  # reduction of singular values
+        self.nmodes = 8  # reduction of singular values
         self.D = self.nmodes
 
         self.x = np.arange(-self.Nx // 2, self.Nx // 2) / self.Nx * self.L
@@ -31,134 +32,98 @@ class synthetic:
         c = 1
 
         print("#############################################")
-        print("Synthetic wildfire_data checks....")
+        print("Synthetic data checks....")
         print("Check 1...")
         ##########################################
-        # %% Create training wildfire_data
-        mu_vecs_train = np.asarray([0.1, 0.2, 0.3])
-        Nsamples_train = np.size(mu_vecs_train)
-        q_train, q1_train, q2_train, shifts_train, params_train, trafos_train = self.create_data(mu_vecs_train)
-
-        U1, S1, VT1 = np.linalg.svd(q1_train, full_matrices=False)
-        U2, S2, VT2 = np.linalg.svd(q2_train, full_matrices=False)
-        err1 = np.sqrt(
-            np.mean(
-                np.linalg.norm(q1_train - U1[:, :self.D] @ (np.diag(S1[:self.D]) @ VT1[:self.D, :]), 2, axis=1) ** 2)) \
-               / np.sqrt(np.mean(np.linalg.norm(q1_train, 2, axis=0) ** 2))
-        err2 = np.sqrt(
-            np.mean(
-                np.linalg.norm(q2_train - U2[:, :self.D] @ (np.diag(S2[:self.D]) @ VT2[:self.D, :]), 2, axis=1) ** 2)) \
-               / np.sqrt(np.mean(np.linalg.norm(q2_train, 2, axis=0) ** 2))
-        print("Error for frame 1 SVD recons. with {} number of modes is {}".format(self.D, err1))
-        print("Error for frame 2 SVD recons. with {} number of modes is {}".format(self.D, err2))
-
+        # %% Create training data
+        self.mu_vecs_train = np.asarray([0.1, 0.15, 0.2, 0.25, 0.3])
+        self.Nsamples_train = np.size(self.mu_vecs_train)
+        self.q_train, q1_train, q2_train, self.shifts_train, self.params_train, self.trafos_train = \
+            self.create_data(self.mu_vecs_train)
         ##########################################
-        # %% Create testing wildfire_data
-        mu_vecs_test = np.asarray([0.15])
-        Nsamples_test = np.size(mu_vecs_test)
+        # %% Create testing data
+        self.mu_vecs_test = np.asarray([0.23])
+        self.Nsamples_test = np.size(self.mu_vecs_test)
         self.q_test, self.q1_test, self.q2_test, self.shifts_test, self.params_test, self.trafos_test = \
-            self.create_data(mu_vecs_test)
+            self.create_data(self.mu_vecs_test)
 
         ##########################################
         # %% Calculate the transformation interpolation error
-        interp_err = give_interpolation_error(q_train, trafos_train[0])
+        interp_err = give_interpolation_error(self.q_train, self.trafos_train[0])
         print("Check 2...")
         print("Transformation interpolation error =  %4.4e " % interp_err)
 
         # Calculate the time amplitudes
-        # qmat = np.reshape(q_train, [-1, Nsamples_train * self.Nt])
-        # [N, M] = np.shape(qmat)
-        # mu0 = N * M / (4 * np.sum(np.abs(qmat))) * 0.0001
-        # lambd0 = 1 / np.sqrt(np.maximum(M, N)) * 10
-        # ret = shifted_rPCA(q_train, trafos_train, nmodes_max=np.max(self.nmodes) + 10, eps=1e-16, Niter=spod_iter,
-        #                    use_rSVD=True,
-        #                    mu=mu0, lambd=lambd0)
-        ret = shifted_POD(q_train, trafos_train, self.nmodes, eps=1e-16, Niter=spod_iter, use_rSVD=True)
+        qmat = np.reshape(self.q_train, [-1, self.Nsamples_train * self.Nt])
+        [N, M] = np.shape(qmat)
+        mu0 = N * M / (4 * np.sum(np.abs(qmat))) * 0.005
+        lambd0 = 1 / np.sqrt(np.maximum(M, N)) * 10
+        ret = shifted_rPCA(self.q_train, self.trafos_train, nmodes_max=np.max(self.D) + 20, eps=1e-16, Niter=spod_iter,
+                           use_rSVD=True, mu=mu0, lambd=lambd0)
+        # ret = shifted_POD(q_train, trafos_train, self.D, eps=1e-16, Niter=spod_iter, use_rSVD=True)
         sPOD_frames, qtilde, rel_err = ret.frames, ret.data_approx, ret.rel_err_hist
 
         ###########################################
-        # %% relative offline error for training wildfire_data (srPCA error)
-        q1_spod_frame = sPOD_frames[0].build_field()
-        q2_spod_frame = sPOD_frames[1].build_field()
-        err_full = np.sqrt(np.mean(np.linalg.norm(q_train - qtilde, 2, axis=1) ** 2)) / \
-                   np.sqrt(np.mean(np.linalg.norm(q_train, 2, axis=1) ** 2))
+        # %% relative offline error for training data (srPCA error)
+        err_full = np.sqrt(np.mean(np.linalg.norm(self.q_train - qtilde, 2, axis=1) ** 2)) / \
+                   np.sqrt(np.mean(np.linalg.norm(self.q_train, 2, axis=1) ** 2))
         print("Check 3...")
-        print("Error for full sPOD recons. is {}".format(err_full))
+        print("Error for full srPCA recons. is {}".format(err_full))
 
         ###########################################
-        # %% Calculate the time amplitudes for training wildfire_data
+        # %% Calculate the time amplitudes for training data
         self.U_list = []
-        frame_amplitude_list = []
-        frame_amplitude_list_training = []
-        shifts_list = []
+        self.TA_interp_list = []
+        TA_training_list = []
+        qtrunc = 0
         cnt = 0
         for frame in sPOD_frames:
-            VT = frame.modal_system["VT"]
-            S = frame.modal_system["sigma"]
+            VT = frame.modal_system["VT"][:self.D, :]
+            S = frame.modal_system["sigma"][:self.D]
             VT = np.diag(S) @ VT
-            Nmodes = frame.Nmodes
-            amplitudes = [np.reshape(VT[n, :], [Nsamples_train, self.Nt]).T for n in range(Nmodes)]
-            shifts = np.reshape(shifts_train[cnt], [Nsamples_train, self.Nt]).T
-            frame_amplitude_list.append(amplitudes)
-            frame_amplitude_list_training.append(VT)
-            self.U_list.append(frame.modal_system["U"])
-            shifts_list.append(shifts)
+            Nmodes = self.D
+            amplitudes = [np.reshape(VT[n, :], [self.Nsamples_train, self.Nt]).T for n in range(Nmodes)]
+            self.TA_interp_list.append(amplitudes)
+            TA_training_list.append(VT)
+            self.U_list.append(frame.modal_system["U"][:, :self.D])
+
+            qtrunc += self.trafos_train[cnt].apply(self.U_list[cnt] @ TA_training_list[cnt])
             cnt = cnt + 1
 
-        ###########################################
-        # %% Implement the interpolation to find the online prediction
-        Nmodes = [self.nmodes, self.nmodes]
-        self.qtilde_frame_wise, self.TA_interpolated = my_interpolated_state(Nmodes, self.U_list, frame_amplitude_list,
-                                                                             mu_vecs_train,
-                                                                             self.Nx, self.Nt,
-                                                                             mu_vecs_test, self.trafos_test)
-        self.delta_pred_frame_wise = my_delta_interpolate(shifts_list, mu_vecs_train, mu_vecs_test)
-
-        num = np.sqrt(np.mean(np.linalg.norm(self.q_test - self.qtilde_frame_wise, 2, axis=1) ** 2))
-        den = np.sqrt(np.mean(np.linalg.norm(self.q_test, 2, axis=1) ** 2))
-        num2 = np.sqrt(np.mean(np.linalg.norm(self.shifts_test[0] - self.delta_pred_frame_wise[0], 2, axis=0) ** 2))
-        den2 = np.sqrt(np.mean(np.linalg.norm(self.shifts_test[0], 2, axis=0) ** 2))
-        num3 = np.sqrt(np.mean(np.linalg.norm(self.shifts_test[1] - self.delta_pred_frame_wise[1], 2, axis=0) ** 2))
-        den3 = np.sqrt(np.mean(np.linalg.norm(self.shifts_test[1], 2, axis=0) ** 2))
-        print("Check 4...")
-        print(
-            "Relative full recon. error for online prediction(interpolation frame wise) for num modes {} is {}".format(
-                self.nmodes, num / den))
-        print(
-            "Relative shift error for online prediction(interpolation) for frame {} is {}".format(
-                1, num2 / den2))
-        print(
-            "Relative shift error for online prediction(interpolation) for frame {} is {}".format(
-                2, num3 / den3))
-        # plot the frames
-        self.plot_sPODframes(q_train, qtilde, q1_spod_frame, q2_spod_frame)
+        err_trunc = np.sqrt(np.mean(np.linalg.norm(self.q_train - qtrunc, 2, axis=1) ** 2)) / \
+                    np.sqrt(np.mean(np.linalg.norm(self.q_train, 2, axis=1) ** 2))
+        print("Error for truncated srPCA recons. is {}".format(err_trunc))
 
         ###########################################
-        # %% Generate wildfire_data for the POD-DL-ROM for comparison
-        U, S, VT = np.linalg.svd(np.squeeze(q_train), full_matrices=False)
-        self.U_POD_TRAIN = U[:, :sum(Nmodes) + 2]
-        self.TA_POD_TRAIN = np.diag(S[:sum(Nmodes) + 2]) @ VT[:sum(Nmodes) + 2, :]
+        # %% Generate data for the POD-DL-ROM for comparison
+        U, S, VT = np.linalg.svd(np.squeeze(self.q_train), full_matrices=False)
+        self.U_POD_TRAIN = U[:, :self.NumFrames * self.D + self.NumFrames]
+        self.TA_POD_TRAIN = np.diag(S[:self.NumFrames * self.D + self.NumFrames]) @ \
+                            VT[:self.NumFrames * self.D + self.NumFrames, :]
         self.TA_POD_TEST = self.U_POD_TRAIN.transpose() @ self.q_test
 
         ###########################################
-        # %% wildfire_data for the NN
-        amplitudes_train = np.concatenate(frame_amplitude_list_training, axis=0)
+        # %% data for the NN
+        amplitudes_train = np.concatenate(TA_training_list, axis=0)
         time_amplitudes_1_test = self.U_list[0][:, :self.D].transpose() @ self.q1_test
         time_amplitudes_2_test = self.U_list[1][:, :self.D].transpose() @ self.q2_test
         amplitudes_test = np.concatenate((time_amplitudes_1_test, time_amplitudes_2_test), axis=0)
 
         self.TA_TRAIN = amplitudes_train
-        self.SHIFTS_TRAIN = [shifts_train[0], shifts_train[1]]
-        self.PARAMS_TRAIN = params_train
+        self.SHIFTS_TRAIN = [self.shifts_train[0], self.shifts_train[1]]
+        self.PARAMS_TRAIN = self.params_train
         self.TA_TEST = amplitudes_test
         self.SHIFTS_TEST = [self.shifts_test[0], self.shifts_test[1]]
         self.PARAMS_TEST = self.params_test
 
         ###########################################
         # %% Plot all the variables required
-        self.plot_trainingframes(q_train, q1_train, q2_train, Nsamples_train)
-        self.plot_trainingshift(shifts_train, mu_vecs_train)
-        self.plot_timeamplitudes(frame_amplitude_list_training)
+        q1_spod_frame = sPOD_frames[0].build_field()
+        q2_spod_frame = sPOD_frames[1].build_field()
+        self.plot_sPODframes(self.q_train, qtilde, q1_spod_frame, q2_spod_frame)
+        self.plot_trainingframes(self.q_train, q1_train, q2_train, self.Nsamples_train)
+        self.plot_trainingshift(self.shifts_train, self.mu_vecs_train)
+        self.plot_timeamplitudes(TA_training_list)
 
     def create_data(self, mu_vecs):
 
@@ -208,91 +173,121 @@ class synthetic:
 
         return q, q1, q2, shifts, p, trafos
 
-    def onlineErroranalysis(self, frame_amplitude_predicted, shifts_predicted, POD_frame_amplitudes_predicted):
+    def onlineErroranalysis(self, TA_sPOD_pred, shifts_sPOD_pred, TA_POD_pred):
         print("#############################################")
         print('Online Error checks')
         ###########################################
         # %% Online error with respect to testing wildfire_data
-        time_amplitudes_1_pred = frame_amplitude_predicted[:self.D, :]
-        time_amplitudes_2_pred = frame_amplitude_predicted[self.D:2 * self.D, :]
-        shifts_1_pred = shifts_predicted[0, :]
-        shifts_2_pred = shifts_predicted[1, :]
+        TA_sPOD_pred_1 = TA_sPOD_pred[:self.D, :]
+        TA_sPOD_pred_2 = TA_sPOD_pred[self.D:2 * self.D, :]
+        shifts_sPOD_pred_1 = shifts_sPOD_pred[0, :]
+        shifts_sPOD_pred_2 = shifts_sPOD_pred[1, :]
+
+        ###########################################
+        # %% Implement the interpolation to find the online prediction
+        shifts_interp_list = []
+        for frame in range(self.NumFrames):
+            shifts = np.reshape(self.shifts_train[frame], [self.Nsamples_train, self.Nt]).T
+            shifts_interp_list.append(shifts)
+        Nmodes = [self.D, self.D]
+        q_interp, TA_interp = my_interpolated_state(Nmodes, self.U_list, self.TA_interp_list,
+                                                    self.mu_vecs_train,
+                                                    self.Nx, self.Ny, self.Nt,
+                                                    self.mu_vecs_test, self.trafos_test)
+        q_interp = np.squeeze(q_interp)
+        shifts_interp = my_delta_interpolate(shifts_interp_list, self.mu_vecs_train, self.mu_vecs_test)
+        ###########################################
 
         # Time amplitudes error
-        time_amplitudes_1_test = self.TA_TEST[:self.D, :]
-        time_amplitudes_2_test = self.TA_TEST[self.D:2 * self.D, :]
-        num1 = np.sqrt(np.mean(np.linalg.norm(time_amplitudes_1_test - time_amplitudes_1_pred, 2, axis=1) ** 2))
-        den1 = np.sqrt(np.mean(np.linalg.norm(time_amplitudes_1_test, 2, axis=1) ** 2))
-        num2 = np.sqrt(np.mean(np.linalg.norm(time_amplitudes_2_test - time_amplitudes_2_pred, 2, axis=1) ** 2))
-        den2 = np.sqrt(np.mean(np.linalg.norm(time_amplitudes_2_test, 2, axis=1) ** 2))
-        num3 = np.sqrt(np.mean(np.linalg.norm(time_amplitudes_1_test - self.TA_interpolated[0], 2, axis=1) ** 2))
-        den3 = np.sqrt(np.mean(np.linalg.norm(time_amplitudes_1_test, 2, axis=1) ** 2))
-        num4 = np.sqrt(np.mean(np.linalg.norm(time_amplitudes_2_test - self.TA_interpolated[1], 2, axis=1) ** 2))
-        den4 = np.sqrt(np.mean(np.linalg.norm(time_amplitudes_2_test, 2, axis=1) ** 2))
-        num5 = np.sqrt(np.mean(np.linalg.norm(self.TA_POD_TEST - POD_frame_amplitudes_predicted, 2, axis=1) ** 2))
+        TA_test_1 = self.TA_TEST[:self.D, :]
+        TA_test_2 = self.TA_TEST[self.D:2 * self.D, :]
+        num1 = np.sqrt(np.mean(np.linalg.norm(TA_test_1 - TA_sPOD_pred_1, 2, axis=1) ** 2))
+        den1 = np.sqrt(np.mean(np.linalg.norm(TA_test_1, 2, axis=1) ** 2))
+        num2 = np.sqrt(np.mean(np.linalg.norm(TA_test_2 - TA_sPOD_pred_2, 2, axis=1) ** 2))
+        den2 = np.sqrt(np.mean(np.linalg.norm(TA_test_2, 2, axis=1) ** 2))
+        num3 = np.sqrt(np.mean(np.linalg.norm(TA_test_1 - TA_interp[0], 2, axis=1) ** 2))
+        den3 = np.sqrt(np.mean(np.linalg.norm(TA_test_1, 2, axis=1) ** 2))
+        num4 = np.sqrt(np.mean(np.linalg.norm(TA_test_2 - TA_interp[1], 2, axis=1) ** 2))
+        den4 = np.sqrt(np.mean(np.linalg.norm(TA_test_2, 2, axis=1) ** 2))
+        num5 = np.sqrt(np.mean(np.linalg.norm(self.TA_POD_TEST - TA_POD_pred, 2, axis=1) ** 2))
         den5 = np.sqrt(np.mean(np.linalg.norm(self.TA_POD_TEST, 2, axis=1) ** 2))
         print('Check 1...')
-        print("Relative time amplitude error indicator for frame: 1 is {}".format(num1 / den1))
-        print("Relative time amplitude error indicator for frame: 2 is {}".format(num2 / den2))
-        print("Relative time amplitude error indicator (interpolation) for frame: 1 is {}".format(num3 / den3))
-        print("Relative time amplitude error indicator (interpolation) for frame: 2 is {}".format(num4 / den4))
-        print("Relative time amplitude error indicator for POD-DL-ROM is {}".format(num5 / den5))
+        print("Relative time amplitude error indicator (sPOD-NN) for frame: 1 is {}".format(num1 / den1))
+        print("Relative time amplitude error indicator (sPOD-NN) for frame: 2 is {}".format(num2 / den2))
+        print("Relative time amplitude error indicator (sPOD-LI) for frame: 1 is {}".format(num3 / den3))
+        print("Relative time amplitude error indicator (sPOD-LI) for frame: 2 is {}".format(num4 / den4))
+        print("Relative time amplitude error indicator (POD-NN) is {}".format(num5 / den5))
 
         # Shifts error
-        num1 = np.sqrt(np.mean(np.linalg.norm(self.SHIFTS_TEST[0] - shifts_1_pred.flatten(), 2, axis=0) ** 2))
+        num1 = np.sqrt(np.mean(np.linalg.norm(self.SHIFTS_TEST[0] - shifts_sPOD_pred_1.flatten(), 2, axis=0) ** 2))
         den1 = np.sqrt(np.mean(np.linalg.norm(self.SHIFTS_TEST[0], 2, axis=0) ** 2))
-        num2 = np.sqrt(np.mean(np.linalg.norm(self.SHIFTS_TEST[1] - shifts_2_pred.flatten(), 2, axis=0) ** 2))
+        num2 = np.sqrt(np.mean(np.linalg.norm(self.SHIFTS_TEST[1] - shifts_sPOD_pred_2.flatten(), 2, axis=0) ** 2))
         den2 = np.sqrt(np.mean(np.linalg.norm(self.SHIFTS_TEST[1], 2, axis=0) ** 2))
+        num3 = np.sqrt(np.mean(np.linalg.norm(self.SHIFTS_TEST[0] - shifts_interp[0], 2, axis=0) ** 2))
+        den3 = np.sqrt(np.mean(np.linalg.norm(self.SHIFTS_TEST[0], 2, axis=0) ** 2))
+        num4 = np.sqrt(np.mean(np.linalg.norm(self.SHIFTS_TEST[1] - shifts_interp[1], 2, axis=0) ** 2))
+        den4 = np.sqrt(np.mean(np.linalg.norm(self.SHIFTS_TEST[1], 2, axis=0) ** 2))
         print('Check 2...')
-        print("Relative error indicator for shift: 1 is {}".format(num1 / den1))
-        print("Relative error indicator for shift: 2 is {}".format(num2 / den2))
+        print("Relative error indicator (sPOD-NN) for shift: 1 is {}".format(num1 / den1))
+        print("Relative error indicator (sPOD-NN) for shift: 2 is {}".format(num2 / den2))
+        print("Relative error indicator (sPOD-LI) for shift: 1 is {}".format(num3 / den3))
+        print("Relative error indicator (sPOD-LI) for shift: 2 is {}".format(num4 / den4))
 
-        # Frame wise error
-        q1_pred = self.U_list[0][:, :self.D] @ time_amplitudes_1_pred
-        q2_pred = self.U_list[1][:, :self.D] @ time_amplitudes_2_pred
-        num1 = np.sqrt(np.mean(np.linalg.norm(self.q1_test - q1_pred, 2, axis=1) ** 2))
-        den1 = np.sqrt(np.mean(np.linalg.norm(self.q1_test, 2, axis=1) ** 2))
-        num2 = np.sqrt(np.mean(np.linalg.norm(self.q2_test - q2_pred, 2, axis=1) ** 2))
-        den2 = np.sqrt(np.mean(np.linalg.norm(self.q2_test, 2, axis=1) ** 2))
-        print('Check 3...')
-        print("Relative frame snapshot reconstruction error indicator for frame: 1 is {}".format(num1 / den1))
-        print("Relative frame snapshot reconstruction error indicator for frame: 2 is {}".format(num2 / den2))
-
+        q_sPOD_pred_1 = self.U_list[0][:, :self.D] @ TA_sPOD_pred_1
+        q_sPOD_pred_2 = self.U_list[1][:, :self.D] @ TA_sPOD_pred_2
         # Total reconstructed error
-        use_original_shift = True
-        Q_recon = 0
+        use_original_shift = False
+        q_sPOD_recon = 0
         NumFrames = 2
-        Q_pred = [q1_pred, q2_pred]
+        q_pred = [q_sPOD_pred_1, q_sPOD_pred_2]
         if use_original_shift:
             for frame in range(NumFrames):
-                Q_recon += self.trafos_test[frame].apply(Q_pred[frame])
+                q_sPOD_recon += self.trafos_test[frame].apply(q_pred[frame])
         else:
             trafos = [
-                transforms([self.Nx, 1, 1, self.Nt], [self.L], shifts=np.squeeze(shifts_1_pred), dx=[self.dx],
+                transforms([self.Nx, 1, 1, self.Nt], [self.L], shifts=np.squeeze(shifts_sPOD_pred_1), dx=[self.dx],
                            use_scipy_transform=False,
                            interp_order=5),
-                transforms([self.Nx, 1, 1, self.Nt], [self.L], shifts=np.squeeze(shifts_2_pred), dx=[self.dx],
+                transforms([self.Nx, 1, 1, self.Nt], [self.L], shifts=np.squeeze(shifts_sPOD_pred_2), dx=[self.dx],
                            use_scipy_transform=False,
                            interp_order=5)]
-            for frame in NumFrames:
-                Q_recon += trafos[frame].apply(Q_pred[frame])
+            for frame in range(NumFrames):
+                q_sPOD_recon += trafos[frame].apply(q_pred[frame])
 
-        num1 = np.sqrt(np.mean(np.linalg.norm(self.q_test - Q_recon, 2, axis=1) ** 2))
+        num1 = np.sqrt(np.mean(np.linalg.norm(self.q_test - q_sPOD_recon, 2, axis=1) ** 2))
         den1 = np.sqrt(np.mean(np.linalg.norm(self.q_test, 2, axis=1) ** 2))
 
-        POD_DL_ROM_recon = self.U_POD_TRAIN @ POD_frame_amplitudes_predicted
-        num2 = np.sqrt(np.mean(np.linalg.norm(self.q_test - POD_DL_ROM_recon, 2, axis=1) ** 2))
+        q_POD_recon = self.U_POD_TRAIN @ TA_POD_pred
+        num2 = np.sqrt(np.mean(np.linalg.norm(self.q_test - q_POD_recon, 2, axis=1) ** 2))
         den2 = np.sqrt(np.mean(np.linalg.norm(self.q_test, 2, axis=1) ** 2))
-        print('Check 4...')
-        print("Relative reconstruction error indicator for full snapshot(sPOD-DL-ROM) is {}".format(num1 / den1))
-        print("Relative reconstruction error indicator for full snapshot(POD-DL-ROM) is {}".format(num2 / den2))
+
+        num3 = np.sqrt(np.mean(np.linalg.norm(self.q_test - q_interp, 2, axis=1) ** 2))
+        den3 = np.sqrt(np.mean(np.linalg.norm(self.q_test, 2, axis=1) ** 2))
+
+        print('Check 3...')
+        print("Relative reconstruction error indicator for full snapshot (sPOD-NN) is {}".format(num1 / den1))
+        print("Relative reconstruction error indicator for full snapshot (POD-NN) is {}".format(num2 / den2))
+        print("Relative reconstruction error indicator for full snapshot (sPOD-LI) is {}".format(num3 / den3))
+
+        num1 = np.abs(self.q_test - q_sPOD_recon)
+        den1 = np.sqrt(np.sum(np.square(np.linalg.norm(self.q_test, axis=0))) / self.Nt)
+        num2 = np.abs(self.q_test - q_POD_recon)
+        den2 = np.sqrt(np.sum(np.square(np.linalg.norm(self.q_test, axis=0))) / self.Nt)
+        num3 = np.abs(self.q_test - q_interp)
+        den3 = np.sqrt(np.sum(np.square(np.linalg.norm(self.q_test, axis=0))) / self.Nt)
+        rel_err_sPOD = num1 / den1
+        rel_err_POD = num2 / den2
+        rel_err_interp = num3 / den3
+
+        errors = [rel_err_sPOD, rel_err_POD, rel_err_interp]
 
         # Plot the online prediction wildfire_data
-        self.plot_timeamplitudesPred(time_amplitudes_1_pred, time_amplitudes_1_test, time_amplitudes_2_pred,
-                                     time_amplitudes_2_test)
-        self.plot_timeamplitudesPredPOD(POD_frame_amplitudes_predicted, nmodes=5)
-        self.plot_shiftsPred(shifts_1_pred, shifts_2_pred)
-        self.plot_recons_snapshot(Q_recon, POD_DL_ROM_recon)
+        self.plot_timeamplitudes_shifts_Pred(TA_sPOD_pred_1, TA_test_1, TA_sPOD_pred_2,
+                                                 TA_test_2, TA_POD_pred, TA_interp, shifts_sPOD_pred_1,
+                                                 shifts_sPOD_pred_2, shifts_interp)
+        self.plot_recons_snapshot(q_sPOD_recon, q_POD_recon, q_interp)
+
+        return errors
 
     def plot_trainingframes(self, q_train, q1_train, q2_train, Nsamples_train):
         Nx = self.Nx
@@ -304,33 +299,34 @@ class synthetic:
         for k in range(0, Nsamples_train):
             kw = k
             axs[0, kw].pcolormesh(q_train[:, Nt * k:Nt * (k + 1)], vmin=qmin, vmax=qmax, cmap=cm)
-            axs[0, kw].set_title(r'${\mu}^{(' + str(k) + ')}$')
+            axs[0, kw].set_title(r'${\mu}_{' + str(k) + '}$')
             axs[0, kw].set_yticks([0, Nx // 2, Nx])
             axs[0, kw].set_xticks([0, Nt // 2, Nt])
             axs[0, kw].set_yticklabels([r"$-L/2$", 0, r"$L/2$"])
             axs[1, kw].pcolormesh(q1_train[:, Nt * k:Nt * (k + 1)], vmin=qmin, vmax=qmax, cmap=cm)
             im = axs[2, kw].pcolormesh(q2_train[:, Nt * k:Nt * (k + 1)], vmin=qmin, vmax=qmax, cmap=cm)
 
-        axs[0, 0].set_ylabel(r"$q$")
-        axs[1, 0].set_ylabel(r"$q_1$")
-        axs[2, 0].set_ylabel(r"$q_2$")
+        # axs[0, 0].set_ylabel(r"$q$")
+        # axs[1, 0].set_ylabel(r"$q^1$")
+        # axs[2, 0].set_ylabel(r"$q^2$")
         axs[0, 0].set_xticklabels(["", r"$T/2$", r"$T$"])
         fig.supxlabel(r"time $t$")
         fig.supylabel(r"space $x$")
         fig.subplots_adjust(right=0.8)
         cbar_ax = fig.add_axes([0.83, 0.25, 0.01, 0.5])
         fig.colorbar(im, cax=cbar_ax)
-        fig.savefig(impath + "synthetic_" + "training" + '.png', dpi=600, transparent=True)
+        fig.savefig(impath + "synthetic_" + "training" + '.png', dpi=800, transparent=True)
 
     def plot_trainingshift(self, shifts_train, mu_vecs_train):
         Nt = len(self.t)
-        fig, axs = plt.subplots(1, len(mu_vecs_train), figsize=(15, 6), num=2)
+        fig, axs = plt.subplots(1, len(mu_vecs_train), figsize=(15, 3), num=2)
         plt.subplots_adjust(wspace=0)
         for k, ax in enumerate(axs):
-            ax.plot(self.t, shifts_train[0][:, k * Nt:(k + 1) * Nt].flatten(), color="red", marker=".", label='frame 1')
-            ax.plot(self.t, shifts_train[1][:, k * Nt:(k + 1) * Nt].flatten(), color="blue", marker=".",
+            ax.plot(self.t, shifts_train[0][:, k * Nt:(k + 1) * Nt].flatten(), color="green", linestyle='-',
+                    label='frame 1')
+            ax.plot(self.t, shifts_train[1][:, k * Nt:(k + 1) * Nt].flatten(), color="black", linestyle='--',
                     label='frame 2')
-            ax.set_title(r'${\mu}^{(' + str(k) + ')}$')
+            ax.set_title(r'${\mu}_{' + str(k) + '}$')
             ax.grid()
             ax.legend(loc='center right')
         fig.supxlabel(r"time $t$")
@@ -341,145 +337,171 @@ class synthetic:
     def plot_sPODframes(self, q_train, qtilde, q1_spod_frame, q2_spod_frame):
         qmin = np.min(q_train)
         qmax = np.max(q_train)
-        fig, axs = plt.subplots(1, 3, num=3, sharey=True, figsize=(10, 3))
+        Nx = self.Nx
+        Nt = self.Nt
+        fig, axs = plt.subplots(1, 3, num=3, sharey=True, sharex=True, figsize=(10, 3))
+        bottom, top = 0.3, 0.9
+        left, right = 0.1, 0.8
+        fig.subplots_adjust(top=top, bottom=bottom, left=left, right=right, hspace=0.15, wspace=0)
         # 1. frame
         k_frame = 0
-        axs[0].pcolormesh(q1_spod_frame[:, :self.Nt], cmap=cm, vmin=qmin, vmax=qmax)
-        axs[0].set_ylabel(r'$i=1,\dots,M$')
-        axs[0].set_xlabel(r'$j=1,\dots,ND$')
-        axs[0].set_title(r"$Q^" + str(k_frame + 1) + "_{i,j}$")
+        im = axs[0].pcolormesh(q1_spod_frame[:, :self.Nt], cmap=cm, vmin=qmin, vmax=qmax)
+        axs[0].set_title(r"$\mathrm{Q}^" + str(k_frame + 1) + "$")
+        axs[0].set_yticks([0, Nx // 2, Nx])
+        axs[0].set_xticks([0, Nt // 2, Nt])
+        axs[0].set_yticklabels([r"$-L/2$", 0, r"$L/2$"])
+        axs[0].set_xticklabels(["", r"$T/2$", r"$T$"])
         # 2. frame
         k_frame = 1
-        axs[1].pcolormesh(q2_spod_frame[:, :self.Nt], cmap=cm, vmin=qmin, vmax=qmax)
-        axs[1].set_xlabel(r'$j=1,\dots,ND$')
-        axs[1].set_title(r"$Q^" + str(k_frame + 1) + "_{i,j}$")
+        im = axs[1].pcolormesh(q2_spod_frame[:, :self.Nt], cmap=cm, vmin=qmin, vmax=qmax)
+        axs[1].set_title(r"$\mathrm{Q}^" + str(k_frame + 1) + "$")
+        axs[1].set_yticks([0, Nx // 2, Nx])
+        axs[1].set_xticks([0, Nt // 2, Nt])
+        axs[1].set_xticklabels(["", r"$T/2$", r"$T$"])
         # Reconstruction
-        axs[2].pcolormesh(qtilde[:, :self.Nt], cmap=cm, vmin=qmin, vmax=qmax)
-        axs[2].set_xlabel(r'$j=1,\dots,ND$')
-        axs[2].set_title(r"$\tilde{Q}" + "_{i,j}$")
-        plt.tight_layout()
+        im = axs[2].pcolormesh(qtilde[:, :self.Nt], cmap=cm, vmin=qmin, vmax=qmax)
+        axs[2].set_title(r"$\mathrm{Q}$")
+        axs[2].set_yticks([0, Nx // 2, Nx])
+        axs[2].set_xticks([0, Nt // 2, Nt])
+        axs[2].set_xticklabels(["", r"$T/2$", r"$T$"])
 
-        save_fig(filepath=impath + "synthetic_spod_frames", figure=fig)
+        cbar_ax = fig.add_axes([0.85, bottom, 0.01, top - bottom])
+        fig.colorbar(im, cax=cbar_ax)
+
+        fig.supxlabel(r"time $t$")
+        fig.supylabel(r"space $x$")
+
+        fig.savefig(impath + "synthetic_spod_frames" + ".png", dpi=800, transparent=True)
 
     def plot_timeamplitudes(self, frame_amplitude_list_training):
-        fig, axs = plt.subplots(1, self.D, sharey=True, figsize=(18, 5), num=6)
+        fig, axs = plt.subplots(1, 3, sharey=True, figsize=(15, 6), num=6)
         plt.subplots_adjust(wspace=0)
         for k, ax in enumerate(axs):
-            ax.plot(self.t, frame_amplitude_list_training[0][k, 0:self.Nt], color="red", marker=".", label='frame 1')
-            ax.plot(self.t, frame_amplitude_list_training[1][k, 0:self.Nt], color="blue", marker=".", label='frame 2')
+            ax.plot(self.t, frame_amplitude_list_training[0][k, 0:self.Nt], color="green", linestyle='-',
+                    label='frame 1')
+            ax.plot(self.t, frame_amplitude_list_training[1][k, 0:self.Nt], color="black", linestyle='-',
+                    label='frame 2')
             ax.set_xticks([0, self.t[-1] / 2, self.t[-1]])
             ax.set_title(r'${mode}^{(' + str(k) + ')}$')
             ax.set_xticklabels(["0", r"$T/2$", r"$T$"])
             ax.grid()
             ax.legend(loc='upper right')
         fig.supxlabel(r"time $t$")
-        fig.supylabel(r"coefficient $a_i^{f}(t,\mu)$")
+        fig.supylabel(r"$a_i^{k}(t,\mu)$")
         fig.tight_layout()
         save_fig(filepath=impath + "time_amplitudes_" + "training", figure=fig)
 
-    def plot_timeamplitudesPred(self, time_amplitudes_1_pred, time_amplitudes_1_test, time_amplitudes_2_pred,
-                                time_amplitudes_2_test):
-        # Frame 1
-        fig, axs = plt.subplots(1, self.D, sharey=True, figsize=(18, 5), num=7)
-        plt.subplots_adjust(wspace=0)
-        for k, ax in enumerate(axs):
-            ax.plot(self.t, time_amplitudes_1_pred[k, :], color="red", marker=".", label='predicted')
-            ax.plot(self.t, time_amplitudes_1_test[k, :], color="blue", marker=".", label='actual')
-            ax.plot(self.t, self.TA_interpolated[0][k, :], color="yellow", marker=".", label='interpolated')
-            ax.set_xticks([0, self.t[-1] / 2, self.t[-1]])
-            ax.set_title(r'${mode}^{(' + str(k) + ')}$')
-            ax.set_xticklabels(["0", r"$T/2$", r"$T$"])
-            ax.legend(loc='upper right')
-            ax.grid()
-        fig.supxlabel(r"time $t$")
-        fig.supylabel(r"coefficient $a_i^{f}(t,\mu)$")
-        fig.tight_layout()
-        save_fig(filepath=impath + "time_amplitudes_frame_1_" + "predicted", figure=fig)
+    def plot_timeamplitudes_shifts_Pred(self, TA_sPOD_pred_1, TA_test_1, TA_sPOD_pred_2,
+                                            TA_test_2, TA_POD_pred, TA_interp, shifts_sPOD_pred_1,
+                                            shifts_sPOD_pred_2, shifts_interp):
 
-        # Frame 2
-        fig, axs = plt.subplots(1, self.D, sharey=True, figsize=(18, 5), num=8)
-        plt.subplots_adjust(wspace=0)
-        for k, ax in enumerate(axs):
-            ax.plot(self.t, time_amplitudes_2_pred[k, :], color="red", marker=".", label='predicted')
-            ax.plot(self.t, time_amplitudes_2_test[k, :], color="blue", marker=".", label='actual')
-            ax.plot(self.t, self.TA_interpolated[1][k, :], color="yellow", marker=".", label='interpolated')
-            ax.set_xticks([0, self.t[-1] / 2, self.t[-1]])
-            ax.set_title(r'${mode}^{(' + str(k) + ')}$')
-            ax.set_xticklabels(["0", r"$T/2$", r"$T$"])
-            ax.legend(loc='upper right')
-            ax.grid()
-        fig.supxlabel(r"time $t$")
-        fig.supylabel(r"coefficient $a_i^{f}(t,\mu)$")
-        fig.tight_layout()
-        save_fig(filepath=impath + "time_amplitudes_frame_2_" + "predicted", figure=fig)
+        fig = plt.figure(figsize=(15, 12), constrained_layout=True)
 
-    def plot_timeamplitudesPredPOD(self, POD_frame_amplitudes_predicted, nmodes):
-        fig, axs = plt.subplots(1, nmodes, sharey=True, figsize=(18, 5), num=9)
-        plt.subplots_adjust(wspace=0)
-        for k, ax in enumerate(axs):
-            ax.plot(self.t, POD_frame_amplitudes_predicted[k, :], color="red", marker=".", label='predicted')
-            ax.plot(self.t, self.TA_POD_TEST[k, :], color="blue", marker=".", label='actual')
-            ax.set_xticks([0, self.t[-1] / 2, self.t[-1]])
-            ax.set_title(r'${mode}^{(' + str(k) + ')}$')
-            ax.set_xticklabels(["0", r"$T/2$", r"$T$"])
-            ax.legend(loc='upper right')
-            ax.grid()
-        fig.supxlabel(r"time $t$")
-        fig.supylabel(r"coefficient $a_i^{f}(t,\mu)$")
-        fig.tight_layout()
-        save_fig(filepath=impath + "time_amplitudes_POD_DL_ROM_" + "predicted", figure=fig)
+        # Create top/bottom subfigs
+        (subfig_t, subfig_b) = fig.subfigures(2, 1, hspace=0.05, wspace=0.1)
 
-    def plot_shiftsPred(self, shifts_1_pred, shifts_2_pred):
+        # put 3 axis in the top subfigure
+        gs_t = subfig_t.add_gridspec(nrows=1, ncols=6)
+        ax1 = subfig_t.add_subplot(gs_t[0, :2])
+        ax2 = subfig_t.add_subplot(gs_t[0, 2:4], sharey=ax1)
+        ax3 = subfig_t.add_subplot(gs_t[0, 4:], sharey=ax1)
+        ax1.plot(self.t, TA_test_1[0, :], color="green", linestyle='-', label='actual')
+        ax1.plot(self.t, TA_sPOD_pred_1[0, :], color="red", linestyle='--', label='sPOD-NN')
+        ax1.plot(self.t, TA_interp[0][0, :], color="blue", linestyle='--', label='sPOD-LI')
+        ax1.set_xticks([0, self.t[-1] / 2, self.t[-1]])
+        ax1.set_xticklabels(["0", r"$T/2$", r"$T$"])
+        ax1.legend(loc='upper right')
+        ax1.set_xlabel(r"(a)")
+        ax1.grid()
 
-        # Frame 1
-        fig, ax = plt.subplots(1, 1, figsize=(15, 6), num=10)
-        plt.subplots_adjust(wspace=0)
-        ax.plot(self.t, self.SHIFTS_TEST[0].flatten(), color="red", marker=".", label='actual')
-        ax.plot(self.t, shifts_1_pred.flatten(), color="blue", marker=".", label='predicted')
-        ax.plot(self.t, self.delta_pred_frame_wise[0], color="yellow", marker=".", label='interpolated')
-        ax.set_xlabel('time', fontsize=14)
-        ax.set_ylabel('space', fontsize=14)
-        ax.set_title(r'${frame}^{(' + str(1) + ')}$')
-        ax.grid()
-        ax.legend(loc='center right')
-        fig.tight_layout()
-        save_fig(filepath=impath + "shifts_frame_1" + "predicted", figure=fig)
+        ax2.plot(self.t, TA_test_2[0, :], color="green", linestyle='-', label='actual')
+        ax2.plot(self.t, TA_sPOD_pred_2[0, :], color="red", linestyle='--', label='sPOD-NN')
+        ax2.plot(self.t, TA_interp[1][0, :], color="blue", linestyle='--', label='sPOD-LI')
+        ax2.set_xticks([0, self.t[-1] / 2, self.t[-1]])
+        ax2.set_xticklabels(["0", r"$T/2$", r"$T$"])
+        ax2.legend(loc='upper right')
+        ax2.set_xlabel(r"(b)")
+        ax2.grid()
 
-        # Frame 2
-        fig, ax = plt.subplots(1, 1, figsize=(15, 6), num=11)
-        plt.subplots_adjust(wspace=0)
-        ax.plot(self.t, self.SHIFTS_TEST[1].flatten(), color="red", marker=".", label='actual')
-        ax.plot(self.t, shifts_2_pred.flatten(), color="blue", marker=".", label='predicted')
-        ax.plot(self.t, self.delta_pred_frame_wise[1], color="yellow", marker=".", label='interpolated')
-        ax.set_xlabel('time', fontsize=14)
-        ax.set_ylabel('space', fontsize=14)
-        ax.set_title(r'${frame}^{(' + str(2) + ')}$')
-        ax.grid()
-        ax.legend(loc='center right')
-        fig.tight_layout()
-        save_fig(filepath=impath + "shifts_frame_2" + "predicted", figure=fig)
+        ax3.plot(self.t, self.TA_POD_TEST[0, :], color="green", linestyle='-', label='actual')
+        ax3.plot(self.t, TA_POD_pred[0, :], color="black", linestyle='--', label='POD-NN')
+        ax3.set_xticks([0, self.t[-1] / 2, self.t[-1]])
+        ax3.set_xticklabels(["0", r"$T/2$", r"$T$"])
+        ax3.legend(loc='upper right')
+        ax3.set_xlabel(r"(c)")
+        ax3.grid()
 
-    def plot_recons_snapshot(self, Q_recon, POD_DL_ROM_recon):
+        subfig_t.supylabel(r"$a_i^{k}(t,\mu)$")
+        subfig_t.supxlabel(r"time $t$")
+
+        # put 2 axis in the bottom subfigure
+        gs_b = subfig_b.add_gridspec(nrows=1, ncols=6)
+        ax4 = subfig_b.add_subplot(gs_b[0, 1:3])
+        ax5 = subfig_b.add_subplot(gs_b[0, 3:5])
+        ax4.plot(self.t, self.SHIFTS_TEST[0].flatten(), color="green", linestyle='-', label='actual')
+        ax4.plot(self.t, shifts_sPOD_pred_1.flatten(), color="red", linestyle='--', label='sPOD-NN')
+        ax4.plot(self.t, shifts_interp[0], color="blue", linestyle='--', label='sPOD-LI')
+        ax4.set_xticks([0, self.t[-1] / 2, self.t[-1]])
+        ax4.set_xticklabels(["0", r"$T/2$", r"$T$"])
+        ax4.set_xlabel(r"(d)")
+        ax4.grid()
+        ax4.legend(loc='lower right')
+
+        ax5.plot(self.t, self.SHIFTS_TEST[1].flatten(), color="green", linestyle='-', label='actual')
+        ax5.plot(self.t, shifts_sPOD_pred_2.flatten(), color="red", linestyle='--', label='sPOD-NN')
+        ax5.plot(self.t, shifts_interp[1], color="blue", linestyle='--', label='sPOD-LI')
+        ax5.set_xticks([0, self.t[-1] / 2, self.t[-1]])
+        ax5.set_xticklabels(["0", r"$T/2$", r"$T$"])
+        ax5.set_xlabel(r"(e)")
+        ax5.grid()
+        ax5.legend(loc='lower left')
+
+        subfig_b.supxlabel(r"time $t$")
+        subfig_b.supylabel(r"space $x$")
+
+        save_fig(filepath=impath + "time_amplitudes_shifts_newplot_" + "predicted", figure=fig)
+        fig.savefig(impath + "time_amplitudes_shifts_newplot_predicted" + ".eps", format='eps',
+                    dpi=600, transparent=True)
+
+    def plot_recons_snapshot(self, q_sPOD_recon, q_POD_recon, q_interp):
         qmin = np.min(self.q_test)
         qmax = np.max(self.q_test)
-        fig, axs = plt.subplots(1, 4, num=12, sharey=True, figsize=(10, 3))
+        Nx = self.Nx
+        Nt = self.Nt
+        fig, axs = plt.subplots(1, 4, num=12, sharey=True, figsize=(12, 3))
+        bottom, top = 0.3, 0.9
+        left, right = 0.1, 0.8
+        fig.subplots_adjust(top=top, bottom=bottom, left=left, right=right, hspace=0.15, wspace=0)
         # Original
-        axs[0].pcolormesh(self.q_test, cmap=cm, vmin=qmin, vmax=qmax)
-        axs[0].set_ylabel(r'$i=1,\dots,M$')
-        axs[0].set_xlabel(r'$j=1,\dots,ND$')
-        axs[0].set_title(r"$Q^" + "{original}" + "_{i,j}$")
+        im = axs[0].pcolormesh(self.q_test, cmap=cm, vmin=qmin, vmax=qmax)
+        axs[0].set_title(r"$\mathrm{Q}^" + "{\mathrm{original}}$")
+        axs[0].set_yticks([0, Nx // 2, Nx])
+        axs[0].set_xticks([0, Nt // 2, Nt])
+        axs[0].set_yticklabels([r"$-L/2$", 0, r"$L/2$"])
+        axs[0].set_xticklabels(["", r"$T/2$", r"$T$"])
         # Interpolated
-        axs[1].pcolormesh(self.qtilde_frame_wise, cmap=cm, vmin=qmin, vmax=qmax)
-        axs[1].set_xlabel(r'$j=1,\dots,ND$')
-        axs[1].set_title(r"$Q^" + "{interpolated}" + "_{i,j}$")
+        axs[1].pcolormesh(q_interp, cmap=cm, vmin=qmin, vmax=qmax)
+        axs[1].set_title(r"$\mathrm{Q}^" + "{\mathrm{sPOD-LI}}$")
+        axs[1].set_yticks([0, Nx // 2, Nx])
+        axs[1].set_xticks([0, Nt // 2, Nt])
+        axs[1].set_xticklabels(["", r"$T/2$", r"$T$"])
         # sPOD NN predicted
-        axs[2].pcolormesh(Q_recon, cmap=cm, vmin=qmin, vmax=qmax)
-        axs[2].set_xlabel(r'$j=1,\dots,ND$')
-        axs[2].set_title(r"$Q^" + "{sPODNN}" + "_{i,j}$")
+        axs[2].pcolormesh(q_sPOD_recon, cmap=cm, vmin=qmin, vmax=qmax)
+        axs[2].set_yticks([0, Nx // 2, Nx])
+        axs[2].set_xticks([0, Nt // 2, Nt])
+        axs[2].set_title(r"$\mathrm{Q}^" + "{\mathrm{sPOD-NN}}$")
+        axs[2].set_xticklabels(["", r"$T/2$", r"$T$"])
         # POD NN predicted
-        axs[3].pcolormesh(POD_DL_ROM_recon, cmap=cm, vmin=qmin, vmax=qmax)
-        axs[3].set_xlabel(r'$j=1,\dots,ND$')
-        axs[3].set_title(r"$Q^" + "{PODNN}" + "_{i,j}$")
-        plt.tight_layout()
+        axs[3].pcolormesh(q_POD_recon, cmap=cm, vmin=qmin, vmax=qmax)
+        axs[3].set_yticks([0, Nx // 2, Nx])
+        axs[3].set_xticks([0, Nt // 2, Nt])
+        axs[3].set_title(r"$\mathrm{Q}^" + "{\mathrm{POD-NN}}$")
+        axs[3].set_xticklabels(["", r"$T/2$", r"$T$"])
 
-        save_fig(filepath=impath + "Snapshot_Comparison", figure=fig)
+        cbar_ax = fig.add_axes([0.85, bottom, 0.01, top - bottom])
+        fig.colorbar(im, cax=cbar_ax)
+
+        fig.supxlabel(r"time $t$")
+        fig.supylabel(r"space $x$")
+
+        fig.savefig(impath + "Snapshot_Comparison" + ".png", dpi=800, transparent=True)

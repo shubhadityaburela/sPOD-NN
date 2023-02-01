@@ -4,6 +4,9 @@ import numpy as np
 import sys
 import os
 import matplotlib.pyplot as plt
+from mpl_toolkits.axes_grid1 import AxesGrid
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 from scipy.fft import fft
 from numpy import meshgrid
 from numpy.linalg import norm
@@ -17,9 +20,20 @@ from farge_colormaps import farge_colormap_multi
 
 plt.rcParams.update({
     "text.usetex": True,
-    "font.size": 16,
     "font.family": "serif",
     "font.serif": ["Computer Modern"]})
+
+SMALL_SIZE = 16   # 16
+MEDIUM_SIZE = 18   # 18
+BIGGER_SIZE = 20   # 20
+
+plt.rc('font', size=SMALL_SIZE)          # controls default text sizes
+plt.rc('axes', titlesize=BIGGER_SIZE)     # fontsize of the axes title
+plt.rc('axes', labelsize=MEDIUM_SIZE)    # fontsize of the x and y labels
+plt.rc('xtick', labelsize=MEDIUM_SIZE)    # fontsize of the tick labels
+plt.rc('ytick', labelsize=MEDIUM_SIZE)    # fontsize of the tick labels
+plt.rc('legend', fontsize=SMALL_SIZE)    # legend fontsize
+plt.rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
 
 cm = farge_colormap_multi(type='velocity', etalement_du_zero=0.02, limite_faible_fort=0.15)
 
@@ -34,7 +48,7 @@ def save_fig(filepath, figure=None, **kwargs):
     ## get figure handle
     if figure is None:
         figure = plt.gcf()
-    figure.savefig(fpath + ".png", dpi=600, transparent=True)
+    figure.savefig(fpath + ".png", dpi=800, transparent=True)
     tikzplotlib.save(
         figure=figure,
         filepath=fpath + ".tex",
@@ -50,7 +64,7 @@ def bin_array(num, m):
     return np.flip(np.array(list(np.binary_repr(num).zfill(m))).astype(np.int8))
 
 
-def my_interpolated_state(Nmodes, U_list, frame_amplitude_list, mu_points, Nx, Nt, mu_vec, trafos_test):
+def my_interpolated_state(Nmodes, U_list, frame_amplitude_list, mu_points, Nx, Ny, Nt, mu_vec, trafos_test):
 
     TA_list = []
     qtilde = 0
@@ -64,28 +78,13 @@ def my_interpolated_state(Nmodes, U_list, frame_amplitude_list, mu_points, Nx, N
         VT = np.asarray(VT)
         TA_list.append(VT)
         Q = U[:, :frame_modes] @ VT
-        qframe = np.reshape(Q, [Nx, 1, 1, Nt])
+        qframe = np.reshape(Q, [Nx, Ny, 1, Nt])
 
         qtilde += trafos_test[nf].apply(qframe)
 
         nf = nf + 1
 
-    return np.squeeze(qtilde), TA_list
-
-
-# def interpolate_POD_states(q, mu_points, Nsamples, Nt, mu_vec, Nmodes):
-#     from scipy.interpolate import griddata
-#
-#     U, S, VT = np.linalg.svd(np.squeeze(q), full_matrices=False)
-#     VT = np.diag(S) @ VT
-#     amplitudes = [np.reshape(VT[n, :], [Nsamples, Nt]).T for n in range(Nmodes)]
-#     VT_interp = []
-#     for k in range(Nmodes):
-#         a = griddata(mu_points, amplitudes[k].T, mu_vec, method='cubic')
-#         VT_interp.append(np.squeeze(a))
-#     VT_interp = np.asarray(VT_interp)
-#
-#     return U[:, :Nmodes] @ VT_interp
+    return qtilde, TA_list
 
 
 def my_interpolated_state_onlyTA(Nmodes, frame_amplitude_list, mu_points, mu_vec):
