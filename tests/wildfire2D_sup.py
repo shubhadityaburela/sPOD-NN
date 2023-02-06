@@ -1,10 +1,4 @@
 import time
-
-import numpy as np
-from scipy.special import eval_hermite
-import os
-import sys
-from random import randint
 from Helper import *
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
@@ -17,7 +11,7 @@ cmap = 'YlOrRd'
 # cmap = 'YlGn'
 
 
-class wildfire2D:
+class wildfire2D_sup:
     def __init__(self, q_test, shifts_test, param_test_val, var):
         dat1_train = np.load(data_path + 'SnapShotMatrix540.npy')
         dat2_train = np.load(data_path + 'SnapShotMatrix550.npy')
@@ -113,7 +107,7 @@ class wildfire2D:
         sPOD_frames_train, qtilde_train, rel_err_train = ret.frames, ret.data_approx, ret.rel_err_hist
         self.q_polar_train = qmat
         ###########################################
-        # %% Calculate the time amplitudes for training wildfire_data
+        # Calculate the time amplitudes for training wildfire_data
         U_list = []
         spod_modes = []
         frame_amplitude_list_interpolation = []
@@ -136,10 +130,6 @@ class wildfire2D:
                          qtilde_train]
 
         return U_list, frame_amplitude_list_training, frame_amplitude_list_interpolation, spod_modes
-
-    def plot_offline_data(self, frame_amplitude_list_training):
-        plot_trainingshift(self.shifts_train, self.Nsamples_train, self.x, self.t)
-        plot_timeamplitudesTraining(frame_amplitude_list_training, self.x, self.t, Nm=2)
 
     def test_data(self, spod_iter):
         ##########################################
@@ -173,8 +163,7 @@ class wildfire2D:
         print("Transformation interpolation error =  %4.4e " % err)
 
         ##########################################
-        # %% run srPCA
-        # Apply srPCA on the data
+        # Apply sPOD on the data
         transform_list = [trafo_test_1, trafo_test_2]
         qmat = np.reshape(q_polar, [-1, self.Nt])
         mu = np.prod(np.size(qmat, 0)) / (4 * np.sum(np.abs(qmat))) * 0.05
@@ -256,10 +245,7 @@ class wildfire2D:
 
     def plot_online_data(self, frame_amplitude_predicted_sPOD, frame_amplitude_predicted_POD,
                          TA_TEST, TA_POD_TEST, TA_list_interp, shifts_predicted, SHIFTS_TEST, spod_modes,
-                         U_list, U_POD_TRAIN, q_test_polar, Q_frames_test_polar):
-
-        q1_test_polar = Q_frames_test_polar[0]
-        q2_test_polar = Q_frames_test_polar[1]
+                         U_list, U_POD_TRAIN, q_test_polar, Q_frames_test_polar, plot_online=False):
 
         print("#############################################")
         print('Online Error checks')
@@ -282,7 +268,7 @@ class wildfire2D:
         data_shape = [self.Nx, self.Ny, 1, self.Nt]
         Ndims = 2
 
-        # %% Implement the interpolation to find the online prediction
+        # Implement the interpolation to find the online prediction
         shifts_list_interpolated = []
         for frame in range(self.NumFrames):
             for dim in range(Ndims):
@@ -317,8 +303,8 @@ class wildfire2D:
         num1_i = np.sqrt(np.mean(np.linalg.norm(SHIFTS_TEST.flatten() - DELTA_PRED_FRAME_WISE[0][0].flatten(), 2, axis=0) ** 2))
         den1_i = np.sqrt(np.mean(np.linalg.norm(SHIFTS_TEST.flatten(), 2, axis=0) ** 2))
         print('Check 1...')
-        print("Relative error indicator for shift: 1 is {}".format(num1 / den1))
-        print("Relative error indicator for shift (interpolation): 1 is {}".format(num1_i / den1_i))
+        print("Relative error indicator for shift for frame 1 (sPOD-NN): {}".format(num1 / den1))
+        print("Relative error indicator for shift for frame 1 (sPOD-LI): {}".format(num1_i / den1_i))
 
         # Time amplitudes error
         time_amplitudes_1_test = TA_TEST[:Nmf[0], :]
@@ -334,22 +320,15 @@ class wildfire2D:
         num3 = np.sqrt(np.mean(np.linalg.norm(TA_POD_TEST - frame_amplitude_predicted_POD, 2, axis=1) ** 2))
         den3 = np.sqrt(np.mean(np.linalg.norm(TA_POD_TEST, 2, axis=1) ** 2))
         print('Check 2...')
-        print("Relative time amplitude error (polar) indicator for frame: 1 is {}".format(num1 / den1))
-        print("Relative time amplitude error (polar) indicator for frame: 2 is {}".format(num2 / den2))
-        print("Relative time amplitude error (polar) indicator for frame(interpolated): 1 is {}".format(num1_i / den1_i))
-        print("Relative time amplitude error (polar) indicator for frame(interpolated): 2 is {}".format(num2_i / den2_i))
-        print("Relative time amplitude error (polar) indicator for POD-NN is {}".format(num3 / den3))
+        print("Relative time amplitude error indicator (polar) for frame 1 (sPOD-NN): {}".format(num1 / den1))
+        print("Relative time amplitude error indicator (polar) for frame 2 (sPOD-NN): {}".format(num2 / den2))
+        print("Relative time amplitude error indicator (polar) for frame 1 (sPOD-LI): {}".format(num1_i / den1_i))
+        print("Relative time amplitude error indicator (polar) for frame 2 (sPOD-LI): {}".format(num2_i / den2_i))
+        print("Relative time amplitude error indicator (polar) (POD-NN): {}".format(num3 / den3))
 
         # Frame wise error
         q1_pred = U_list[0] @ time_amplitudes_1_pred
         q2_pred = U_list[1] @ time_amplitudes_2_pred
-        num1 = np.sqrt(np.mean(np.linalg.norm(q1_test_polar - q1_pred, 2, axis=1) ** 2))
-        den1 = np.sqrt(np.mean(np.linalg.norm(q1_test_polar, 2, axis=1) ** 2))
-        num2 = np.sqrt(np.mean(np.linalg.norm(q2_test_polar - q2_pred, 2, axis=1) ** 2))
-        den2 = np.sqrt(np.mean(np.linalg.norm(q2_test_polar, 2, axis=1) ** 2))
-        print('Check 3...')
-        print("Relative frame snapshot reconstruction (polar) error indicator for frame: 1 is {}".format(num1 / den1))
-        print("Relative frame snapshot reconstruction (polar) error indicator for frame: 2 is {}".format(num2 / den2))
 
         use_original_shift = False
         NumFrames = 2
@@ -357,7 +336,6 @@ class wildfire2D:
         Q_pred = [np.reshape(q1_pred, newshape=data_shape), np.reshape(q2_pred, newshape=data_shape)]
         q_test_polar = np.reshape(q_test_polar, newshape=data_shape)
         Q_recon_sPOD_polar = np.zeros_like(q_test_polar)
-        tic = time.process_time()
         if use_original_shift:
             shifts = self.shifts_test
         else:
@@ -377,47 +355,22 @@ class wildfire2D:
 
         for frame in range(NumFrames):
             Q_recon_sPOD_polar += trafos[frame].apply(Q_pred[frame])
-        toc = time.process_time()
-        print(f"Time consumption in sPOD DL model for full snapshot : {toc - tic:0.4f} seconds")
         res = q_test_polar - Q_recon_sPOD_polar
         err_full_sPOD = np.linalg.norm(np.reshape(res, -1)) / np.linalg.norm(np.reshape(q_test_polar, -1))
 
-        tic = time.process_time()
         Q_recon_POD_polar = U_POD_TRAIN @ frame_amplitude_predicted_POD
         Q_recon_POD_polar = np.reshape(Q_recon_POD_polar, newshape=data_shape)
-        toc = time.process_time()
-        print(f"Time consumption in POD DL model for full snapshot : {toc - tic:0.4f} seconds")
         res = q_test_polar - Q_recon_POD_polar
         err_full_POD = np.linalg.norm(np.reshape(res, -1)) / np.linalg.norm(np.reshape(q_test_polar, -1))
 
         res = q_test_polar - QTILDE_FRAME_WISE
         err_full_interp = np.linalg.norm(np.reshape(res, -1)) / np.linalg.norm(np.reshape(q_test_polar, -1))
 
-        print('Check 4...')
-        print("Relative reconstruction error indicator for full snapshot(sPOD-NN) (polar) is {}".format(err_full_sPOD))
-        print("Relative reconstruction error indicator for full snapshot(POD-NN) (polar) is {}".format(err_full_POD))
+        print('Check 3...')
+        print("Relative reconstruction error indicator for full snapshot (polar) (sPOD-NN): {}".format(err_full_sPOD))
         print(
-            "Relative reconstruction error indicator for full snapshot(sPOD-LI) (polar) is {}".format(err_full_interp))
-
-        num1 = np.sqrt(sum([np.square(np.linalg.norm((q_test_polar[:, :, 0, n].flatten() -
-                                    Q_recon_sPOD_polar[:, :, 0, n].flatten()))) for n in range(self.Nt)]))
-        den1 = np.sqrt(sum([np.square(np.linalg.norm((q_test_polar[:, :, 0, n].flatten()))) for n in range(self.Nt)]))
-        num2 = np.sqrt(sum([np.square(np.linalg.norm((q_test_polar[:, :, 0, n].flatten() -
-                                                      Q_recon_POD_polar[:, :, 0, n].flatten()))) for n in
-                            range(self.Nt)]))
-        den2 = np.sqrt(sum([np.square(np.linalg.norm((q_test_polar[:, :, 0, n].flatten()))) for n in range(self.Nt)]))
-        num3 = np.sqrt(sum([np.square(np.linalg.norm((q_test_polar[:, :, 0, n].flatten() -
-                                                      QTILDE_FRAME_WISE[:, :, 0, n].flatten()))) for n in
-                            range(self.Nt)]))
-        den3 = np.sqrt(sum([np.square(np.linalg.norm((QTILDE_FRAME_WISE[:, :, 0, n].flatten()))) for n in range(self.Nt)]))
-
-        err_rel_sPOD = num1/den1
-        err_rel_POD = num2/den2
-        err_rel_interp = num3/den3
-        print('Check 5...')
-        print("Rel err indicator for full snapshot(sPOD-NN) (polar) is {}".format(err_rel_sPOD))
-        print("Rel err indicator for full snapshot(POD-NN) (polar) is {}".format(err_rel_POD))
-        print("Rel err indicator for full snapshot(sPOD-LI) (polar) is {}".format(err_rel_interp))
+            "Relative reconstruction error indicator for full snapshot (polar) (sPOD-LI) (polar) is {}".format(err_full_interp))
+        print("Relative reconstruction error indicator for full snapshot (polar) (POD-NN) (polar) is {}".format(err_full_POD))
 
         num1 = [np.abs(q_test_polar[:, :, 0, n].flatten() - Q_recon_sPOD_polar[:, :, 0, n].flatten()) for n in range(self.Nt)]
         den1 = np.sqrt(sum([np.square(np.linalg.norm((q_test_polar[:, :, 0, n].flatten()))) for n in range(self.Nt)]) / self.Nt)
@@ -445,31 +398,12 @@ class wildfire2D:
         err_full_POD = np.linalg.norm(np.reshape(res, -1)) / np.linalg.norm(np.reshape(Q, -1))
         res = Q - Q_recon_interp_cart
         err_full_interp = np.linalg.norm(np.reshape(res, -1)) / np.linalg.norm(np.reshape(Q, -1))
-        print('Check 6...')
-        print("Relative reconstruction error indicator for full snapshot(sPOD-DL-ROM) (cartesian) is {}".format(
+        print('Check 4...')
+        print("Relative reconstruction error indicator for full snapshot (cartesian) (sPOD-NN): {}".format(
             err_full_sPOD))
-        print(
-            "Relative reconstruction error indicator for full snapshot(POD-DL-ROM) (cartesian) is {}".format(err_full_POD))
-
-        num1 = np.sqrt(sum([np.square(np.linalg.norm((Q[:, :, 0, n].flatten() -
-                                                      Q_recon_sPOD_cart[:, :, 0, n].flatten()))) for n in
-                            range(self.Nt)]))
-        den1 = np.sqrt(sum([np.square(np.linalg.norm((Q[:, :, 0, n].flatten()))) for n in range(self.Nt)]))
-        num2 = np.sqrt(sum([np.square(np.linalg.norm((Q[:, :, 0, n].flatten() -
-                                                      Q_recon_POD_cart[:, :, 0, n].flatten()))) for n in
-                            range(self.Nt)]))
-        den2 = np.sqrt(sum([np.square(np.linalg.norm((Q[:, :, 0, n].flatten()))) for n in range(self.Nt)]))
-        num3 = np.sqrt(sum([np.square(np.linalg.norm((Q[:, :, 0, n].flatten() -
-                                                      Q_recon_interp_cart[:, :, 0, n].flatten()))) for n in
-                            range(self.Nt)]))
-        den3 = np.sqrt(sum([np.square(np.linalg.norm((Q[:, :, 0, n].flatten()))) for n in range(self.Nt)]))
-        err_rel_sPOD = num1 / den1
-        err_rel_POD = num2 / den2
-        err_rel_interp = num3 / den3
-        print('Check 7...')
-        print("Rel err indicator for full snapshot(sPOD-NN) (cartesian) is {}".format(err_rel_sPOD))
-        print("Rel err indicator for full snapshot(POD-NN) (cartesian) is {}".format(err_rel_POD))
-        print("Rel err indicator for full snapshot(sPOD-LI) (cartesian) is {}".format(err_rel_interp))
+        print("Relative reconstruction error indicator for full snapshot (cartesian) (sPOD-LI): {}".format(
+            err_full_interp))
+        print("Relative reconstruction error indicator for full snapshot (cartesian) (POD-NN): {}".format(err_full_POD))
 
         num1 = [np.abs(Q[:, :, 0, n].flatten() - Q_recon_sPOD_cart[:, :, 0, n].flatten()) for n in
                 range(self.Nt)]
@@ -487,12 +421,12 @@ class wildfire2D:
         rel_err_POD_cart = [x / den2 for x in num2]
         rel_err_interp_cart = [x / den3 for x in num3]
 
-        # Plot the online prediction wildfire_data
-        plot_pred_comb(time_amplitudes_1_pred, time_amplitudes_1_test, time_amplitudes_2_pred,
-                       time_amplitudes_2_test, TA_INTERPOLATED, shifts_1_pred, SHIFTS_TEST,
-                       frame_amplitude_predicted_POD, TA_POD_TEST, self.x, self.t)
-        # ###########################################################################
-        # 4. in the last, implement the interpolation part
+        if plot_online:
+            # Plot the online prediction data
+            plot_pred_comb(time_amplitudes_1_pred, time_amplitudes_1_test, time_amplitudes_2_pred,
+                           time_amplitudes_2_test, TA_INTERPOLATED, shifts_1_pred, SHIFTS_TEST,
+                           frame_amplitude_predicted_POD, TA_POD_TEST, self.x, self.t)
+
         errors = [rel_err_sPOD_pol, rel_err_POD_pol, rel_err_interp_pol, rel_err_sPOD_cart,
                   rel_err_POD_cart, rel_err_interp_cart]
 
@@ -564,43 +498,6 @@ class wildfire2D:
 
         fig.savefig(impath + str(var_name) + "-mixed", dpi=800, transparent=True)
         plt.close(fig)
-
-
-def plot_trainingshift(shifts_train, Nsamples_train, x, t):
-    Nx = len(x)
-    Nt = len(t)
-    fig, axs = plt.subplots(1, Nsamples_train, figsize=(15, 6), num=2)
-    plt.subplots_adjust(wspace=0)
-    for k, ax in enumerate(axs):
-        ax.plot(t, shifts_train[0][0, k * Nt:(k + 1) * Nt], color="red", marker=".", label='frame 1')
-        ax.plot(t, shifts_train[1][0, k * Nt:(k + 1) * Nt], color="black", marker=".", label='frame 2')
-        ax.set_title(r'${\beta}^{(' + str(k + 1) + ')}$')
-        ax.grid()
-        ax.legend(loc='upper right')
-    fig.supxlabel(r"time $t$")
-    fig.supylabel(r"space $x$")
-    fig.tight_layout()
-    save_fig(filepath=impath + "shifts_" + "training", figure=fig)
-
-
-def plot_timeamplitudesTraining(frame_amplitude_list_training, x, t, Nm):
-    Nx = len(x)
-    Nt = len(t)
-    fig, axs = plt.subplots(1, Nm, sharey=True, figsize=(18, 5), num=4)
-    plt.subplots_adjust(wspace=0)
-    for k, ax in enumerate(axs):
-        ax.plot(t, frame_amplitude_list_training[0][k, :Nt], color="red",
-                marker=".", label='frame 1')
-        ax.plot(t, frame_amplitude_list_training[1][k, :Nt], color="black",
-                marker=".", label='frame 2')
-        ax.set_xticks([0, t[-1] / 2, t[-1]])
-        ax.set_title(r'${mode}^{(' + str(k + 1) + ')}$')
-        ax.set_xticklabels(["0", r"$T/2$", r"$T$"])
-        ax.legend(loc='upper right')
-    fig.supxlabel(r"time $t$")
-    fig.supylabel(r"coefficient $a_i^{f}(t,\mu)$")
-    fig.tight_layout()
-    save_fig(filepath=impath + "time_amplitudes_training", figure=fig)
 
 
 def plot_pred_comb(time_amplitudes_1_pred, time_amplitudes_1_test, time_amplitudes_2_pred,

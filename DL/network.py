@@ -16,11 +16,22 @@ from torch.nn import ReLU, ELU, LeakyReLU
 from torch.nn import Module
 from torch.optim import SGD
 from torch.nn import MSELoss
-from torch.nn import L1Loss
+from torch.nn import L1Loss, HuberLoss
 from torch.nn.init import xavier_uniform_
 import os
 import time
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import GradientBoostingRegressor
 
+
+import torch
+if torch.cuda.is_available():
+   print("The current device: ", torch.cuda.current_device())
+   print("Name of the device: ", torch.cuda.get_device_name(0))
+   print("Number of GPUs avaliable: ", torch.cuda.device_count())
+
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(DEVICE)
 
 sys.path.append('../DL-ROM/LIB/')
 
@@ -84,10 +95,13 @@ class CSVDataset(Dataset):
     # load the dataset
     def __init__(self, ta_train, p_train, n_outputs):
         # store the inputs and outputs
-        self.X = np.transpose(p_train.astype('float32'))
-        self.y = np.transpose(ta_train.astype('float32'))
+        self.X = torch.transpose(torch.from_numpy(p_train.astype('float32')), 0, 1)
+        self.y = torch.transpose(torch.from_numpy(ta_train.astype('float32')), 0, 1)
         # ensure target has the right shape
         self.y = self.y.reshape((len(self.y), n_outputs))
+
+        self.X = self.X.to(DEVICE)
+        self.y = self.y.to(DEVICE)
 
     # number of rows in the dataset
     def __len__(self):
@@ -112,64 +126,83 @@ class MLP(Module):
     def __init__(self, n_inputs, n_outputs):
         super(MLP, self).__init__()
         # input to first hidden layer
-        self.hidden1 = Linear(n_inputs, 25)
-        xavier_uniform_(self.hidden1.weight)
+        self.input = Linear(n_inputs, 25)
+        xavier_uniform_(self.input.weight)
         self.act1 = ELU()
-        # second hidden layer
-        self.hidden2 = Linear(25, 50)
-        xavier_uniform_(self.hidden2.weight)
+        # first hidden layer
+        self.hidden1 = Linear(25, 50)
+        xavier_uniform_(self.hidden1.weight)
         self.act2 = ELU()
-        # third hidden layer
-        self.hidden3 = Linear(50, 75)
-        xavier_uniform_(self.hidden3.weight)
+        # second hidden layer
+        self.hidden2 = Linear(50, 75)
+        xavier_uniform_(self.hidden2.weight)
         self.act3 = ELU()
-        # fourth hidden layer
-        self.hidden4 = Linear(75, 50)
-        xavier_uniform_(self.hidden4.weight)
+        # third hidden layer
+        self.hidden3 = Linear(75, 50)
+        xavier_uniform_(self.hidden3.weight)
         self.act4 = LeakyReLU()
-        # fourth layer and output
-        self.hidden5 = Linear(50, n_outputs)
-        xavier_uniform_(self.hidden5.weight)
+        # output layer and output
+        self.output = Linear(50, n_outputs)
+        xavier_uniform_(self.output.weight)
 
     # forward propagate input
     def forward(self, X):
         # input to first hidden layer
-        X = self.hidden1(X)
+        X = self.input(X)
         X = self.act1(X)
+        # first hidden layer
+        X = self.hidden1(X)
+        X = self.act2(X)
         # second hidden layer
         X = self.hidden2(X)
-        X = self.act2(X)
+        X = self.act3(X)
         # third hidden layer
         X = self.hidden3(X)
-        X = self.act3(X)
-        # fourth hidden layer
-        X = self.hidden4(X)
         X = self.act4(X)
-        # fourth layer and output
-        X = self.hidden5(X)
+        # output layer and output
+        X = self.output(X)
         return X
 
 
 # prepare the dataset
-def prepare_data(ta_train, p_train, n_outputs):
+def prepare_data(ta_train, p_train, n_outputs, batch_size):
     # load the dataset
     dataset = CSVDataset(ta_train, p_train, n_outputs)
     # calculate split
     train, val = dataset.get_splits()
-    # prepare wildfire_data loaders
-    train_dl = DataLoader(train, batch_size=500, shuffle=True)
-    val_dl = DataLoader(val, batch_size=500, shuffle=False)
+    # prepare data loaders
+    train_dl = DataLoader(train, batch_size=batch_size, shuffle=True)
+    val_dl = DataLoader(val, batch_size=batch_size, shuffle=False)
     return train_dl, val_dl
 
 
+def CombinedLoss(y, y_t, params):
+
+    L1 = L1Loss()
+    MSE = MSELoss()
+
+    A = y[:, :params['totalModes']]
+    delta = y[:, params['totalModes']:]
+    A_t = y_t[:, :params['totalModes']]
+    delta_t = y_t[:, params['totalModes']:]
+
+    return L1(delta, delta_t) + L1(A, A_t)
+
+
 # train the model
-def train_model(train_dl, val_dl, n_outputs, model, epochs, lr=0.01, loss='L1'):
+def train_model(train_dl, val_dl, n_outputs, model, params, epochs, lr=0.01, loss_type='L1'):
     # define the optimization
-    if loss == 'L1':
+    if loss_type == 'L1':
         criterion = L1Loss()
-    elif loss == 'MSE':
+    elif loss_type == 'MSE':
         criterion = MSELoss()
+    elif loss_type == 'Huber':
+        criterion = HuberLoss(delta=1e-3)
     optimizer = SGD(model.parameters(), lr=lr, momentum=0.9)
+
+    best_so_far = 1e12  # For early stopping criteria
+    trigger_times_early_stopping = 0
+    patience_early_stopping = params['num_early_stop']
     # enumerate epochs
     for epoch in range(epochs):
         # enumerate mini batches
@@ -182,7 +215,10 @@ def train_model(train_dl, val_dl, n_outputs, model, epochs, lr=0.01, loss='L1'):
             # compute the model output
             yhat = model(inputs)
             # calculate loss
-            loss = criterion(yhat, targets)
+            if loss_type == 'L1+MSE':
+                loss = CombinedLoss(yhat, targets, params)
+            else:
+                loss = criterion(yhat, targets)
             # credit assignment
             loss.backward()
             # update model weights
@@ -192,53 +228,53 @@ def train_model(train_dl, val_dl, n_outputs, model, epochs, lr=0.01, loss='L1'):
             nBatches += 1
 
         model.eval()
+        valLoss = 0
         predictions, actuals = list(), list()
         for i, (inputs, targets) in enumerate(val_dl):
-            # evaluate the model on the test set
+            # evaluate the model on the validation set
             yhat = model(inputs)
+            # calculate validation loss
+            if loss_type == 'L1+MSE':
+                loss = CombinedLoss(yhat, targets, params)
+            else:
+                loss = criterion(yhat, targets)
+            valLoss += loss.item()
             # retrieve numpy array
-            yhat = yhat.detach().numpy()
-            actual = targets.numpy()
+            yhat = yhat.cpu().detach().numpy()
+            actual = targets.cpu().numpy()
             actual = actual.reshape((len(actual), n_outputs))
             # store
             predictions.append(yhat)
             actuals.append(actual)
         predictions, actuals = vstack(predictions), vstack(actuals)
+
+        num = np.sqrt(np.mean(np.linalg.norm(actuals - predictions, 2, axis=1) ** 2))
+        den = np.sqrt(np.mean(np.linalg.norm(actuals, 2, axis=1) ** 2))
+        rel_err = num / den
+
+        mse = mean_squared_error(actuals, predictions)
+
+        if valLoss / nBatches > best_so_far:
+            trigger_times_early_stopping += 1
+            if trigger_times_early_stopping >= patience_early_stopping:
+                print('\n')
+                print('Early stopping....')
+                print('Validation loss did not improve from {} thus exiting the epoch '
+                      'loop.........'.format(best_so_far))
+                break
+        else:
+            best_so_far = valLoss / nBatches
+            trigger_times_early_stopping = 0
+
         if epoch % 500 == 0:
-            num = np.sqrt(np.mean(np.linalg.norm(actuals - predictions, 2, axis=1) ** 2))
-            den = np.sqrt(np.mean(np.linalg.norm(actuals, 2, axis=1) ** 2))
-            rel_err = num / den
-            print('Average loss at epoch {0} on training set: {1} and validation set: {2}'.
-                  format(epoch, trainLoss / nBatches, rel_err))
-
-
-# evaluate the model
-def evaluate_model(val_dl, model, n_outputs):
-    predictions, actuals = list(), list()
-    for i, (inputs, targets) in enumerate(val_dl):
-        # evaluate the model on the test set
-        yhat = model(inputs)
-        # retrieve numpy array
-        yhat = yhat.detach().numpy()
-        actual = targets.numpy()
-        actual = actual.reshape((len(actual), n_outputs))
-        # store
-        predictions.append(yhat)
-        actuals.append(actual)
-    predictions, actuals = vstack(predictions), vstack(actuals)
-
-    # calculate mse
-    mse = mean_squared_error(actuals, predictions)
-
-    num = np.sqrt(np.mean(np.linalg.norm(actuals - predictions, 2, axis=1) ** 2))
-    den = np.sqrt(np.mean(np.linalg.norm(actuals, 2, axis=1) ** 2))
-    rel_err = num / den
-
-    return rel_err
+            print('Epoch {0}::loss(training):{1:.5f}, loss(validation):{2:.5f}, rel err(validation):{3:.5f}'.
+                  format(epoch, trainLoss / nBatches, valLoss / nBatches, rel_err))
 
 
 def test_model(TA_TEST, params_test, trained_model=None, saved_model=True,
-               PATH_TO_WEIGHTS='', params=None, scaling=None):
+               PATH_TO_WEIGHTS='', params=None, scaling=None, batch_size=None,
+               test_shifts_separately=False, num_test_shifts=None, trained_gbrt=None,
+               saved_gbrt=False, PATH_TO_GBRT=''):
 
     if params['scaling']:
         # Reading the scaling factors for the testing wildfire_data
@@ -250,18 +286,41 @@ def test_model(TA_TEST, params_test, trained_model=None, saved_model=True,
         parameter_min = scaling[5]
 
     # test the model
-    n_outputs = np.size(TA_TEST, 0)
+    if test_shifts_separately:
+        SHIFTS_TEST = TA_TEST[-num_test_shifts:, :]
+
+        X_test = np.transpose(params_test)
+        y_test = np.transpose(SHIFTS_TEST)
+        SHIFTS_PRED = np.zeros_like(y_test)
+        # Test the model
+        if saved_gbrt:
+            import joblib
+            model_gbrt = joblib.load(PATH_TO_GBRT + 'gbrt.pkl')
+        else:
+            model_gbrt = trained_gbrt
+        for idx in range(len(model_gbrt)):
+            y_pred = model_gbrt[idx].predict(X_test)
+
+            SHIFTS_PRED[:, idx] = y_pred
+
+        TA_TEST = TA_TEST[:-num_test_shifts, :]
+        n_outputs = np.size(TA_TEST, 0)
+    else:
+        n_outputs = np.size(TA_TEST, 0)
+
     test_set = CSVDataset(TA_TEST, params_test, n_outputs)
-    test_dl = DataLoader(test_set, batch_size=500, shuffle=False)
+    test_dl = DataLoader(test_set, batch_size=batch_size, shuffle=False)
 
     numParams = np.size(params_test, 0)
 
     # define the network
     if saved_model:
         model = MLP(numParams, n_outputs)
-        model.load_state_dict(torch.load(PATH_TO_WEIGHTS))
+        model.load_state_dict(torch.load(PATH_TO_WEIGHTS, map_location=DEVICE))
     else:
         model = trained_model
+
+    model.to(DEVICE)
 
     model.eval()
     predictions, actuals = list(), list()
@@ -269,13 +328,17 @@ def test_model(TA_TEST, params_test, trained_model=None, saved_model=True,
         # evaluate the model on the test set
         yhat = model(inputs)
         # retrieve numpy array
-        yhat = yhat.detach().numpy()
-        actual = targets.numpy()
+        yhat = yhat.cpu().detach().numpy()
+        actual = targets.cpu().numpy()
         actual = actual.reshape((len(actual), n_outputs))
         # store
         predictions.append(yhat)
         actuals.append(actual)
     predictions, actuals = vstack(predictions), vstack(actuals)
+
+    if test_shifts_separately:
+        predictions = np.concatenate((predictions, SHIFTS_PRED), axis=1)
+        actuals = np.concatenate((actuals, np.transpose(SHIFTS_TEST)), axis=1)
 
     if params['scaling']:
         modes_test_output = predictions[:, :params['totalModes']]
@@ -299,37 +362,68 @@ def test_model(TA_TEST, params_test, trained_model=None, saved_model=True,
     return rel_err, np.transpose(predictions)
 
 
-def run_model(TA_TRAIN, params_train, epochs, lr, loss,
+def run_model(TA_TRAIN, params_train, epochs, lr, loss_type,
               logs_folder, pretrained_load=False, pretrained_weights='',
-              params=None):
+              params=None, batch_size=None, train_shifts_separately=False,
+              num_train_shifts=None):
 
     log_folder = logs_folder + '/' + time.strftime("%Y_%m_%d__%H-%M-%S", time.localtime()) + '/'
     if not os.path.isdir(log_folder):
         os.makedirs(log_folder)
 
-    numParams = np.size(params_train, 0)
-    numOutputs = np.size(TA_TRAIN, 0)
-
     scaling = 0
     if params['scaling']:
         TA_TRAIN, params_train, scaling = scale_data(TA_TRAIN, params_train, params)
 
-    # prepare the wildfire_data
-    train_dl, val_dl = prepare_data(TA_TRAIN, params_train, numOutputs)
+    numParams = np.size(params_train, 0)
+    if train_shifts_separately:
+        # prepare the data
+        SHIFTS_TRAIN = TA_TRAIN[-num_train_shifts:, :]
+        X_train, X_val, y_train, y_val = train_test_split(np.transpose(params_train), np.transpose(SHIFTS_TRAIN))
+
+        model_regressor = []
+        for idx in range(num_train_shifts):
+            # Best regressor model
+            best_regressor = GradientBoostingRegressor(
+                max_depth=6,
+                n_estimators=8000,
+                learning_rate=0.01,
+                loss='absolute_error',
+                subsample=0.7
+            )
+            best_regressor.fit(X_train, y_train[:, idx])
+
+            y_pred = best_regressor.predict(X_val)
+
+            num = np.linalg.norm(y_val[:, idx] - y_pred)
+            den = np.linalg.norm(y_val[:, idx])
+            rel_err = num / den
+
+            print("evaluation error for shift {} is {}".format(idx, rel_err))
+
+            model_regressor.append(best_regressor)
+
+        TA_TRAIN = TA_TRAIN[:-num_train_shifts, :]
+        numOutputs = np.size(TA_TRAIN, 0)
+    else:
+        model_regressor = []
+        numOutputs = np.size(TA_TRAIN, 0)
+  
+    # prepare the data
+    train_dl, val_dl = prepare_data(TA_TRAIN, params_train, numOutputs, batch_size=batch_size)
 
     # define the network
     model = MLP(numParams, numOutputs)
 
     # load pretrained weights
     if pretrained_load:
-        model.load_state_dict(torch.load(pretrained_weights))
+        model.load_state_dict(torch.load(pretrained_weights, map_location=DEVICE))
+
+    # Move the model to DEVICE
+    model.to(DEVICE)
 
     # train the model
-    train_model(train_dl, val_dl, numOutputs, model, epochs=epochs, lr=lr, loss=loss)
-
-    # evaluate the model
-    rel_err = evaluate_model(val_dl, model, numOutputs)
-    print("Relative evaluation error :", rel_err)
+    train_model(train_dl, val_dl, numOutputs, model, params, epochs=epochs, lr=lr, loss_type=loss_type)
 
     # Save the model
     log_folder_trained_model = log_folder + '/trained_weights/'
@@ -338,9 +432,13 @@ def run_model(TA_TRAIN, params_train, epochs, lr, loss,
 
     torch.save(model.state_dict(), log_folder_trained_model + 'weights.pt')
 
+    import pickle
+    with open(log_folder + 'gbrt.pkl', 'wb') as f:
+        pickle.dump(model_regressor, f)
+
     log_folder_variables = log_folder + '/variables/'
     if not os.path.isdir(log_folder_variables):
         os.makedirs(log_folder_variables)
     np.save(log_folder_variables + 'scaling.npy', scaling, allow_pickle=True)
 
-    return model, scaling
+    return model, model_regressor, scaling

@@ -1,14 +1,12 @@
-import numpy as np
 from scipy.special import eval_hermite
-import os
 from Helper import *
 
 impath = "../plots/images_synthetic/"
 os.makedirs(impath, exist_ok=True)
 
 
-class synthetic:
-    def __init__(self, spod_iter):
+class synthetic_sup:
+    def __init__(self, spod_iter, plot_offline_data=False):
         self.Nx = 500  # number of grid points in x
         self.Ny = 1  # number of grid points in y
         self.Nt = 500  # numer of time intervals
@@ -33,24 +31,23 @@ class synthetic:
 
         print("#############################################")
         print("Synthetic data checks....")
-        print("Check 1...")
         ##########################################
-        # %% Create training data
+        # Create training data
         self.mu_vecs_train = np.asarray([0.1, 0.15, 0.2, 0.25, 0.3])
         self.Nsamples_train = np.size(self.mu_vecs_train)
         self.q_train, q1_train, q2_train, self.shifts_train, self.params_train, self.trafos_train = \
             self.create_data(self.mu_vecs_train)
         ##########################################
-        # %% Create testing data
+        # Create testing data
         self.mu_vecs_test = np.asarray([0.23])
         self.Nsamples_test = np.size(self.mu_vecs_test)
         self.q_test, self.q1_test, self.q2_test, self.shifts_test, self.params_test, self.trafos_test = \
             self.create_data(self.mu_vecs_test)
 
         ##########################################
-        # %% Calculate the transformation interpolation error
+        # Calculate the transformation interpolation error
         interp_err = give_interpolation_error(self.q_train, self.trafos_train[0])
-        print("Check 2...")
+        print("Check 1...")
         print("Transformation interpolation error =  %4.4e " % interp_err)
 
         # Calculate the time amplitudes
@@ -64,14 +61,14 @@ class synthetic:
         sPOD_frames, qtilde, rel_err = ret.frames, ret.data_approx, ret.rel_err_hist
 
         ###########################################
-        # %% relative offline error for training data (srPCA error)
+        # relative offline error for training data (srPCA error)
         err_full = np.sqrt(np.mean(np.linalg.norm(self.q_train - qtilde, 2, axis=1) ** 2)) / \
                    np.sqrt(np.mean(np.linalg.norm(self.q_train, 2, axis=1) ** 2))
-        print("Check 3...")
-        print("Error for full srPCA recons. is {}".format(err_full))
+        print("Check 2...")
+        print("Error for full sPOD recons. is {}".format(err_full))
 
         ###########################################
-        # %% Calculate the time amplitudes for training data
+        # Calculate the time amplitudes for training data
         self.U_list = []
         self.TA_interp_list = []
         TA_training_list = []
@@ -92,10 +89,10 @@ class synthetic:
 
         err_trunc = np.sqrt(np.mean(np.linalg.norm(self.q_train - qtrunc, 2, axis=1) ** 2)) / \
                     np.sqrt(np.mean(np.linalg.norm(self.q_train, 2, axis=1) ** 2))
-        print("Error for truncated srPCA recons. is {}".format(err_trunc))
+        print("Error for truncated sPOD recons. is {}".format(err_trunc))
 
         ###########################################
-        # %% Generate data for the POD-DL-ROM for comparison
+        # Generate data for the POD-NN for comparison
         U, S, VT = np.linalg.svd(np.squeeze(self.q_train), full_matrices=False)
         self.U_POD_TRAIN = U[:, :self.NumFrames * self.D + self.NumFrames]
         self.TA_POD_TRAIN = np.diag(S[:self.NumFrames * self.D + self.NumFrames]) @ \
@@ -103,7 +100,7 @@ class synthetic:
         self.TA_POD_TEST = self.U_POD_TRAIN.transpose() @ self.q_test
 
         ###########################################
-        # %% data for the NN
+        # data for the NN
         amplitudes_train = np.concatenate(TA_training_list, axis=0)
         time_amplitudes_1_test = self.U_list[0][:, :self.D].transpose() @ self.q1_test
         time_amplitudes_2_test = self.U_list[1][:, :self.D].transpose() @ self.q2_test
@@ -116,14 +113,12 @@ class synthetic:
         self.SHIFTS_TEST = [self.shifts_test[0], self.shifts_test[1]]
         self.PARAMS_TEST = self.params_test
 
-        ###########################################
-        # %% Plot all the variables required
-        q1_spod_frame = sPOD_frames[0].build_field()
-        q2_spod_frame = sPOD_frames[1].build_field()
-        self.plot_sPODframes(self.q_train, qtilde, q1_spod_frame, q2_spod_frame)
-        self.plot_trainingframes(self.q_train, q1_train, q2_train, self.Nsamples_train)
-        self.plot_trainingshift(self.shifts_train, self.mu_vecs_train)
-        self.plot_timeamplitudes(TA_training_list)
+        if plot_offline_data:
+            # Plot all the variables required
+            q1_spod_frame = sPOD_frames[0].build_field()
+            q2_spod_frame = sPOD_frames[1].build_field()
+            self.plot_FOM_data(self.q_train, q1_train, q2_train, self.Nsamples_train)
+            self.plot_sPODframes(self.q_train, qtilde, q1_spod_frame, q2_spod_frame)
 
     def create_data(self, mu_vecs):
 
@@ -173,7 +168,7 @@ class synthetic:
 
         return q, q1, q2, shifts, p, trafos
 
-    def onlineErroranalysis(self, TA_sPOD_pred, shifts_sPOD_pred, TA_POD_pred):
+    def OnlinePredictionAnalysis(self, TA_sPOD_pred, shifts_sPOD_pred, TA_POD_pred, plot_online_data=False):
         print("#############################################")
         print('Online Error checks')
         ###########################################
@@ -266,8 +261,8 @@ class synthetic:
 
         print('Check 3...')
         print("Relative reconstruction error indicator for full snapshot (sPOD-NN) is {}".format(num1 / den1))
-        print("Relative reconstruction error indicator for full snapshot (POD-NN) is {}".format(num2 / den2))
         print("Relative reconstruction error indicator for full snapshot (sPOD-LI) is {}".format(num3 / den3))
+        print("Relative reconstruction error indicator for full snapshot (POD-NN) is {}".format(num2 / den2))
 
         num1 = np.abs(self.q_test - q_sPOD_recon)
         den1 = np.sqrt(np.sum(np.square(np.linalg.norm(self.q_test, axis=0))) / self.Nt)
@@ -281,15 +276,16 @@ class synthetic:
 
         errors = [rel_err_sPOD, rel_err_POD, rel_err_interp]
 
-        # Plot the online prediction wildfire_data
-        self.plot_timeamplitudes_shifts_Pred(TA_sPOD_pred_1, TA_test_1, TA_sPOD_pred_2,
-                                                 TA_test_2, TA_POD_pred, TA_interp, shifts_sPOD_pred_1,
-                                                 shifts_sPOD_pred_2, shifts_interp)
-        self.plot_recons_snapshot(q_sPOD_recon, q_POD_recon, q_interp)
+        if plot_online_data:
+            # Plot the online prediction data
+            self.plot_timeamplitudes_shifts_Pred(TA_sPOD_pred_1, TA_test_1, TA_sPOD_pred_2,
+                                                     TA_test_2, TA_POD_pred, TA_interp, shifts_sPOD_pred_1,
+                                                     shifts_sPOD_pred_2, shifts_interp)
+            self.plot_recons_snapshot(q_sPOD_recon, q_POD_recon, q_interp)
 
         return errors
 
-    def plot_trainingframes(self, q_train, q1_train, q2_train, Nsamples_train):
+    def plot_FOM_data(self, q_train, q1_train, q2_train, Nsamples_train):
         Nx = self.Nx
         Nt = self.Nt
         fig, axs = plt.subplots(3, Nsamples_train, sharey=True, sharex=True, figsize=(10, 6), num=1)
@@ -316,23 +312,6 @@ class synthetic:
         cbar_ax = fig.add_axes([0.83, 0.25, 0.01, 0.5])
         fig.colorbar(im, cax=cbar_ax)
         fig.savefig(impath + "synthetic_" + "training" + '.png', dpi=800, transparent=True)
-
-    def plot_trainingshift(self, shifts_train, mu_vecs_train):
-        Nt = len(self.t)
-        fig, axs = plt.subplots(1, len(mu_vecs_train), figsize=(15, 3), num=2)
-        plt.subplots_adjust(wspace=0)
-        for k, ax in enumerate(axs):
-            ax.plot(self.t, shifts_train[0][:, k * Nt:(k + 1) * Nt].flatten(), color="green", linestyle='-',
-                    label='frame 1')
-            ax.plot(self.t, shifts_train[1][:, k * Nt:(k + 1) * Nt].flatten(), color="black", linestyle='--',
-                    label='frame 2')
-            ax.set_title(r'${\mu}_{' + str(k) + '}$')
-            ax.grid()
-            ax.legend(loc='center right')
-        fig.supxlabel(r"time $t$")
-        fig.supylabel(r"space $x$")
-        fig.tight_layout()
-        save_fig(filepath=impath + "shifts_" + "training", figure=fig)
 
     def plot_sPODframes(self, q_train, qtilde, q1_spod_frame, q2_spod_frame):
         qmin = np.min(q_train)
@@ -372,24 +351,6 @@ class synthetic:
         fig.supylabel(r"space $x$")
 
         fig.savefig(impath + "synthetic_spod_frames" + ".png", dpi=800, transparent=True)
-
-    def plot_timeamplitudes(self, frame_amplitude_list_training):
-        fig, axs = plt.subplots(1, 3, sharey=True, figsize=(15, 6), num=6)
-        plt.subplots_adjust(wspace=0)
-        for k, ax in enumerate(axs):
-            ax.plot(self.t, frame_amplitude_list_training[0][k, 0:self.Nt], color="green", linestyle='-',
-                    label='frame 1')
-            ax.plot(self.t, frame_amplitude_list_training[1][k, 0:self.Nt], color="black", linestyle='-',
-                    label='frame 2')
-            ax.set_xticks([0, self.t[-1] / 2, self.t[-1]])
-            ax.set_title(r'${mode}^{(' + str(k) + ')}$')
-            ax.set_xticklabels(["0", r"$T/2$", r"$T$"])
-            ax.grid()
-            ax.legend(loc='upper right')
-        fig.supxlabel(r"time $t$")
-        fig.supylabel(r"$a_i^{k}(t,\mu)$")
-        fig.tight_layout()
-        save_fig(filepath=impath + "time_amplitudes_" + "training", figure=fig)
 
     def plot_timeamplitudes_shifts_Pred(self, TA_sPOD_pred_1, TA_test_1, TA_sPOD_pred_2,
                                             TA_test_2, TA_POD_pred, TA_interp, shifts_sPOD_pred_1,

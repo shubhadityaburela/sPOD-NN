@@ -102,7 +102,7 @@ def run_model(TA_TRAIN, params_train, params):
 
     TA_TRAIN, params_train, scaling = scale_data(TA_TRAIN, params_train, params)
 
-    # prepare the wildfire_data
+    # prepare the data
     X_train, X_val, y_train, y_val = train_test_split(np.transpose(params_train), np.transpose(TA_TRAIN))
 
     regressor_list = []
@@ -110,8 +110,8 @@ def run_model(TA_TRAIN, params_train, params):
         # Best regressor model
         best_regressor = GradientBoostingRegressor(
             max_depth=6,
-            n_estimators=5000,
-            learning_rate=0.01,
+            n_estimators=20000,
+            learning_rate=0.001,
             loss='absolute_error',
             subsample=0.7
         )
