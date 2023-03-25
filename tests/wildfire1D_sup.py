@@ -8,6 +8,8 @@ os.makedirs(impath, exist_ok=True)
 data_path = os.path.abspath(".") + '/wildfire_data/1D/'
 
 cmap = 'YlOrRd'
+
+
 # cmap = 'YlGn'
 
 
@@ -40,7 +42,8 @@ class wildfire1D_sup:
 
         q_train_total = np.concatenate((dat1_train, dat2_train, dat3_train, dat4_train, dat5_train), axis=1)
         self.q_train = q_train_total[var * self.Nx:(var + 1) * self.Nx, :]
-        self.shifts_train = np.concatenate((delta1_train, delta2_train, delta3_train, delta4_train, delta5_train), axis=1)
+        self.shifts_train = np.concatenate((delta1_train, delta2_train, delta3_train, delta4_train, delta5_train),
+                                           axis=1)
 
         self.Nsamples_train = 5
         self.NumFrames = 3
@@ -185,13 +188,19 @@ class wildfire1D_sup:
     def plot_online_data(self, frame_amplitude_predicted_sPOD, frame_amplitude_predicted_POD,
                          TA_TEST, TA_POD_TEST, TA_list_interp, shifts_predicted,
                          SHIFTS_TEST, spod_modes, U_list, U_POD_TRAIN, Q_frames_test,
-                         plot_online=False):
+                         plot_online=False, test_type=None):
+
+        if test_type['typeOfTest'] == "query":
+            test_sample = test_type['test_sample']
+            self.q_test = self.q_test[:, test_sample][..., np.newaxis]
+            self.shifts_train = np.asarray([self.shifts_train[:, i * self.Nt + test_sample]
+                                            for i in range(self.Nsamples_train)]).transpose()
 
         print("#############################################")
         print('Online Error checks')
         # Online error with respect to testing data
         Nx = len(self.x)
-        Nt = len(self.t)
+        Nt = frame_amplitude_predicted_sPOD.shape[1]  # len(self.t)
         dx = self.x[1] - self.x[0]
         Nmf = spod_modes
         time_amplitudes_1_pred = frame_amplitude_predicted_sPOD[:Nmf[0], :]
@@ -201,17 +210,18 @@ class wildfire1D_sup:
         shifts_3_pred = shifts_predicted[1, :]
 
         # Implement the interpolation to find the online prediction
+        tic_I = time.process_time()
         shifts_list_interpolated = []
         cnt = 0
         for frame in range(self.NumFrames):
-            shifts = np.reshape(self.shifts_train[cnt], [self.Nsamples_train, self.Nt]).T
+            shifts = np.reshape(self.shifts_train[cnt], [self.Nsamples_train, Nt]).T
             shifts_list_interpolated.append(shifts)
             cnt = cnt + 1
 
         DELTA_PRED_FRAME_WISE = my_delta_interpolate(shifts_list_interpolated, self.mu_vecs_train, self.mu_vecs_test)
         data_shape = [Nx, 1, 1, Nt]
         L = [self.x[-1]]
-
+        tic_trafo_1 = time.process_time()
         trafo_interpolated_1 = transforms(data_shape, L, shifts=DELTA_PRED_FRAME_WISE[0], dx=[dx],
                                           use_scipy_transform=False,
                                           interp_order=5)
@@ -221,68 +231,66 @@ class wildfire1D_sup:
         trafo_interpolated_3 = transforms(data_shape, L, shifts=DELTA_PRED_FRAME_WISE[2], dx=[dx],
                                           use_scipy_transform=False,
                                           interp_order=5)
-
+        toc_trafo_1 = time.process_time()
         trafos_interpolated = [trafo_interpolated_1, trafo_interpolated_2, trafo_interpolated_3]
 
         QTILDE_FRAME_WISE, TA_INTERPOLATED = my_interpolated_state(spod_modes, U_list,
                                                                    TA_list_interp, self.mu_vecs_train,
-                                                                   Nx, 1, Nt, self.mu_vecs_test, trafos_interpolated)
+                                                                   Nx, 1, Nt, self.mu_vecs_test,
+                                                                   trafos_interpolated)
         QTILDE_FRAME_WISE = np.squeeze(QTILDE_FRAME_WISE)
+        toc_I = time.process_time()
 
         # Shifts error
-        num1_i = np.sqrt(np.mean(np.linalg.norm(SHIFTS_TEST[0] - DELTA_PRED_FRAME_WISE[0], 2, axis=0) ** 2))
-        den1_i = np.sqrt(np.mean(np.linalg.norm(SHIFTS_TEST[0], 2, axis=0) ** 2))
-        num3_i = np.sqrt(np.mean(np.linalg.norm(SHIFTS_TEST[1] - DELTA_PRED_FRAME_WISE[2], 2, axis=0) ** 2))
-        den3_i = np.sqrt(np.mean(np.linalg.norm(SHIFTS_TEST[1], 2, axis=0) ** 2))
+        num1_i = np.linalg.norm(SHIFTS_TEST[0] - DELTA_PRED_FRAME_WISE[0])
+        den1_i = np.linalg.norm(SHIFTS_TEST[0])
+        num3_i = np.linalg.norm(SHIFTS_TEST[1] - DELTA_PRED_FRAME_WISE[2])
+        den3_i = np.linalg.norm(SHIFTS_TEST[1])
 
-        num1 = np.sqrt(np.mean(np.linalg.norm(SHIFTS_TEST[0] - shifts_1_pred.flatten(), 2, axis=0) ** 2))
-        den1 = np.sqrt(np.mean(np.linalg.norm(SHIFTS_TEST[0], 2, axis=0) ** 2))
-        num3 = np.sqrt(np.mean(np.linalg.norm(SHIFTS_TEST[1] - shifts_3_pred.flatten(), 2, axis=0) ** 2))
-        den3 = np.sqrt(np.mean(np.linalg.norm(SHIFTS_TEST[1], 2, axis=0) ** 2))
+        num1 = np.linalg.norm(SHIFTS_TEST[0] - shifts_1_pred.flatten())
+        den1 = np.linalg.norm(SHIFTS_TEST[0])
+        num3 = np.linalg.norm(SHIFTS_TEST[1] - shifts_3_pred.flatten())
+        den3 = np.linalg.norm(SHIFTS_TEST[1])
         print('Check 1...')
         print("Relative error indicator for shift for frame 1 (sPOD-NN): {}".format(num1 / den1))
         print("Relative error indicator for shift for frame 3 (sPOD-NN): {}".format(num3 / den3))
-        print("Relative error indicator for shift for frame 1 (sPOD-LI): {}".format(num1_i / den1_i))
-        print("Relative error indicator for shift for frame 3 (sPOD-LI): {}".format(num3_i / den3_i))
+        print("Relative error indicator for shift for frame 1 (sPOD-I): {}".format(num1_i / den1_i))
+        print("Relative error indicator for shift for frame 3 (sPOD-I): {}".format(num3_i / den3_i))
 
         # Time amplitudes error
         time_amplitudes_1_test = TA_TEST[:Nmf[0], :]
         time_amplitudes_2_test = TA_TEST[Nmf[0]:Nmf[0] + Nmf[1], :]
         time_amplitudes_3_test = TA_TEST[Nmf[0] + Nmf[1]:, :]
-        num1 = np.sqrt(np.mean(np.linalg.norm(time_amplitudes_1_test - time_amplitudes_1_pred, 2, axis=1) ** 2))
-        den1 = np.sqrt(np.mean(np.linalg.norm(time_amplitudes_1_test, 2, axis=1) ** 2))
-        num2 = np.sqrt(np.mean(np.linalg.norm(time_amplitudes_2_test - time_amplitudes_2_pred, 2, axis=1) ** 2))
-        den2 = np.sqrt(np.mean(np.linalg.norm(time_amplitudes_2_test, 2, axis=1) ** 2))
-        num3 = np.sqrt(np.mean(np.linalg.norm(time_amplitudes_3_test - time_amplitudes_3_pred, 2, axis=1) ** 2))
-        den3 = np.sqrt(np.mean(np.linalg.norm(time_amplitudes_3_test, 2, axis=1) ** 2))
+        num1 = np.linalg.norm(time_amplitudes_1_test - time_amplitudes_1_pred)
+        den1 = np.linalg.norm(time_amplitudes_1_test)
+        num2 = np.linalg.norm(time_amplitudes_2_test - time_amplitudes_2_pred)
+        den2 = np.linalg.norm(time_amplitudes_2_test)
+        num3 = np.linalg.norm(time_amplitudes_3_test - time_amplitudes_3_pred)
+        den3 = np.linalg.norm(time_amplitudes_3_test)
 
-        num4 = np.sqrt(np.mean(np.linalg.norm(time_amplitudes_1_test - TA_INTERPOLATED[0], 2, axis=1) ** 2))
-        den4 = np.sqrt(np.mean(np.linalg.norm(time_amplitudes_1_test, 2, axis=1) ** 2))
-        num5 = np.sqrt(np.mean(np.linalg.norm(time_amplitudes_2_test - TA_INTERPOLATED[1], 2, axis=1) ** 2))
-        den5 = np.sqrt(np.mean(np.linalg.norm(time_amplitudes_2_test, 2, axis=1) ** 2))
-        num6 = np.sqrt(np.mean(np.linalg.norm(time_amplitudes_3_test - TA_INTERPOLATED[2], 2, axis=1) ** 2))
-        den6 = np.sqrt(np.mean(np.linalg.norm(time_amplitudes_3_test, 2, axis=1) ** 2))
+        num4 = np.linalg.norm(np.squeeze(time_amplitudes_1_test) - TA_INTERPOLATED[0])
+        den4 = np.linalg.norm(np.squeeze(time_amplitudes_1_test))
+        num5 = np.linalg.norm(np.squeeze(time_amplitudes_2_test) - TA_INTERPOLATED[1])
+        den5 = np.linalg.norm(np.squeeze(time_amplitudes_2_test))
+        num6 = np.linalg.norm(np.squeeze(time_amplitudes_3_test) - TA_INTERPOLATED[2])
+        den6 = np.linalg.norm(np.squeeze(time_amplitudes_3_test))
 
-        num7 = np.sqrt(np.mean(np.linalg.norm(TA_POD_TEST - frame_amplitude_predicted_POD, 2, axis=1) ** 2))
-        den7 = np.sqrt(np.mean(np.linalg.norm(TA_POD_TEST, 2, axis=1) ** 2))
+        num7 = np.linalg.norm(TA_POD_TEST - frame_amplitude_predicted_POD)
+        den7 = np.linalg.norm(TA_POD_TEST)
         print('Check 2...')
         print("Relative time amplitude error indicator for frame 1 (sPOD-NN): {}".format(num1 / den1))
         print("Relative time amplitude error indicator for frame 2 (sPOD-NN): {}".format(num2 / den2))
         print("Relative time amplitude error indicator for frame 3 (sPOD-NN): {}".format(num3 / den3))
-        print("Relative time amplitude error indicator for frame 1 (sPOD-LI): {}".format(num4 / den4))
-        print("Relative time amplitude error indicator for frame 2 (sPOD-LI): {}".format(num5 / den5))
-        print("Relative time amplitude error indicator for frame 3 (sPOD-LI): {}".format(num6 / den6))
+        print("Relative time amplitude error indicator for frame 1 (sPOD-I): {}".format(num4 / den4))
+        print("Relative time amplitude error indicator for frame 2 (sPOD-I): {}".format(num5 / den5))
+        print("Relative time amplitude error indicator for frame 3 (sPOD-I): {}".format(num6 / den6))
         print("Relative time amplitude error indicator (POD-NN) is {}".format(num7 / den7))
 
         # Frame wise error
+        tic_sPOD = time.process_time()
         q1_pred = U_list[0] @ time_amplitudes_1_pred
         q2_pred = U_list[1] @ time_amplitudes_2_pred
         q3_pred = U_list[2] @ time_amplitudes_3_pred
-
-        # Total reconstructed error
-        num1_i = np.sqrt(np.mean(np.linalg.norm(self.q_test - QTILDE_FRAME_WISE, 2, axis=1) ** 2))
-        den1_i = np.sqrt(np.mean(np.linalg.norm(self.q_test, 2, axis=1) ** 2))
-
         use_interp_shift = False
         Q_recon_sPOD = np.zeros_like(q1_pred)
         NumFrames = 3
@@ -297,32 +305,38 @@ class wildfire1D_sup:
             shifts_3 = shifts_3_pred
 
         L = [self.x[-1]]
-        trafos = [
-            transforms([Nx, 1, 1, Nt], L, shifts=np.squeeze(shifts_1),
-                       dx=[dx],
-                       use_scipy_transform=False,
-                       interp_order=5),
-            transforms([Nx, 1, 1, Nt], L, shifts=np.squeeze(shifts_2), trafo_type="identity",
-                       dx=[dx],
-                       use_scipy_transform=False,
-                       interp_order=5),
-            transforms([Nx, 1, 1, Nt], L, shifts=np.squeeze(shifts_3),
-                       dx=[dx],
-                       use_scipy_transform=False,
-                       interp_order=5)
-        ]
-
+        tic_trafo_2 = time.process_time()
+        trafos_1 = transforms(data_shape, L, shifts=shifts_1, dx=[dx],
+                              use_scipy_transform=False,
+                              interp_order=5)
+        trafos_2 = transforms(data_shape, L, shifts=shifts_2, trafo_type="identity", dx=[dx],
+                              use_scipy_transform=False,
+                              interp_order=5)
+        trafos_3 = transforms(data_shape, L, shifts=shifts_3, dx=[dx],
+                              use_scipy_transform=False,
+                              interp_order=5)
+        toc_trafo_2 = time.process_time()
+        trafos = [trafos_1, trafos_2, trafos_3]
         for frame in range(NumFrames):
             Q_recon_sPOD += trafos[frame].apply(Q_pred[frame])
-        num1 = np.sqrt(np.mean(np.linalg.norm(self.q_test - Q_recon_sPOD, 2, axis=1) ** 2))
-        den1 = np.sqrt(np.mean(np.linalg.norm(self.q_test, 2, axis=1) ** 2))
+        toc_sPOD = time.process_time()
 
+        tic_POD = time.process_time()
         Q_recon_POD = U_POD_TRAIN @ frame_amplitude_predicted_POD
-        num2 = np.sqrt(np.mean(np.linalg.norm(self.q_test - Q_recon_POD, 2, axis=1) ** 2))
-        den2 = np.sqrt(np.mean(np.linalg.norm(self.q_test, 2, axis=1) ** 2))
+        toc_POD = time.process_time()
+
+        num1 = np.linalg.norm(self.q_test - Q_recon_sPOD)
+        den1 = np.linalg.norm(self.q_test)
+
+        num2 = np.linalg.norm(self.q_test - Q_recon_POD)
+        den2 = np.linalg.norm(self.q_test)
+
+        num1_i = np.linalg.norm(np.squeeze(self.q_test) - QTILDE_FRAME_WISE)
+        den1_i = np.linalg.norm(np.squeeze(self.q_test))
+
         print('Check 3...')
         print("Relative reconstruction error indicator for full snapshot (sPOD-NN): {}".format(num1 / den1))
-        print("Relative reconstruction error indicator for full snapshot (sPOD-LI): {}".format(num1_i / den1_i))
+        print("Relative reconstruction error indicator for full snapshot (sPOD-I): {}".format(num1_i / den1_i))
         print("Relative reconstruction error indicator for full snapshot (POD-NN): {}".format(num2 / den2))
 
         num1 = np.abs(self.q_test - Q_recon_sPOD)
@@ -338,13 +352,22 @@ class wildfire1D_sup:
         errors = [rel_err_sPOD, rel_err_POD, rel_err_interp]
 
         if plot_online:
-            # Plot the online prediction data
-            plot_pred_comb(time_amplitudes_1_pred, time_amplitudes_1_test, time_amplitudes_2_pred,
-                           time_amplitudes_2_test, time_amplitudes_3_pred, time_amplitudes_3_test,
-                           TA_INTERPOLATED, shifts_1_pred, shifts_3_pred, SHIFTS_TEST, DELTA_PRED_FRAME_WISE,
-                           frame_amplitude_predicted_POD, TA_POD_TEST, self.x, self.t)
-            plot_recons_snapshot(self.q_test, QTILDE_FRAME_WISE, Q_recon_sPOD, Q_recon_POD, self.x, self.t)
-            plot_recons_snapshot_cross_section(self.q_test, QTILDE_FRAME_WISE, Q_recon_sPOD, Q_recon_POD, self.x, self.t)
+            if test_type['typeOfTest'] != "query":
+                plot_pred_comb(time_amplitudes_1_pred, time_amplitudes_1_test, time_amplitudes_2_pred,
+                               time_amplitudes_2_test, time_amplitudes_3_pred, time_amplitudes_3_test,
+                               TA_INTERPOLATED, shifts_1_pred, shifts_3_pred, SHIFTS_TEST, DELTA_PRED_FRAME_WISE,
+                               frame_amplitude_predicted_POD, TA_POD_TEST, self.x, self.t)
+                plot_recons_snapshot_cross_section(self.q_test, QTILDE_FRAME_WISE, Q_recon_sPOD, Q_recon_POD, self.x,
+                                                   self.t)
+
+        print('Timing...')
+        print(
+            f"Time consumption in assembling the transformation operators (sPOD-NN) : {toc_trafo_2 - tic_trafo_2:0.4f} seconds")
+        print(
+            f"Time consumption in assembling the transformation operators (sPOD-I) : {toc_trafo_1 - tic_trafo_1:0.4f} seconds")
+        print(f"Time consumption in assembling the final solution (sPOD-NN) : {((toc_sPOD - tic_sPOD) - (toc_trafo_2 - tic_trafo_2)):0.4f} seconds")
+        print(f"Time consumption in assembling the final solution (sPOD-I)  : {((toc_I - tic_I) - (toc_trafo_1 - tic_trafo_1)):0.4f} seconds")
+        print(f"Time consumption in assembling the final solution (POD-NN)  : {toc_POD - tic_POD:0.4f} seconds")
 
         return errors
 
@@ -367,28 +390,28 @@ def plot_sPODframes(q_test, q1_spod_frame, q2_spod_frame, q3_spod_frame, qtilde,
     im = axs[0].pcolormesh(Xgrid, Tgrid, qtilde, vmin=qmin, vmax=qmax, cmap=cmap)
     # axs[0].axis('off')
     axs[0].axis('scaled')
-    axs[0].set_xlabel(r"$\mathrm{Q}$")
+    axs[0].set_xlabel(r"$Q$")
     axs[0].set_yticks([], [])
     axs[0].set_xticks([], [])
     # 1. frame
     axs[1].pcolormesh(Xgrid, Tgrid, q1_spod_frame, vmin=qmin, vmax=qmax, cmap=cmap)
     # axs[1].axis('off')
     axs[1].axis('scaled')
-    axs[1].set_xlabel(r"$\mathrm{T}^{\Delta^1}\mathrm{Q}^1$")
+    axs[1].set_xlabel(r"$T^{\Delta^1}Q^1$")
     axs[1].set_yticks([], [])
     axs[1].set_xticks([], [])
     # 2. frame
     axs[2].pcolormesh(Xgrid, Tgrid, q2_spod_frame, vmin=qmin, vmax=qmax, cmap=cmap)
     # axs[2].axis('off')
     axs[2].axis('scaled')
-    axs[2].set_xlabel(r"$\mathrm{T}^{\Delta^2}\mathrm{Q}^2$")
+    axs[2].set_xlabel(r"$T^{\Delta^2}Q^2$")
     axs[2].set_yticks([], [])
     axs[2].set_xticks([], [])
     # 3. frame
     axs[3].pcolormesh(Xgrid, Tgrid, q3_spod_frame, vmin=qmin, vmax=qmax, cmap=cmap)
     # axs[3].axis('off')
     axs[3].axis('scaled')
-    axs[3].set_xlabel(r"$\mathrm{T}^{\Delta^3}\mathrm{Q}^3$")
+    axs[3].set_xlabel(r"$T^{\Delta^3}Q^3$")
     axs[3].set_yticks([], [])
     axs[3].set_xticks([], [])
 
@@ -411,7 +434,7 @@ def plot_pred_comb(time_amplitudes_1_pred, time_amplitudes_1_test, time_amplitud
     fig, axs = plt.subplots(3, 2, figsize=(12, 15))
     axs[0, 0].plot(t, time_amplitudes_1_test[0, :Nt], color="green", linestyle='-', label='actual')
     axs[0, 0].plot(t, time_amplitudes_1_pred[0, :Nt], color="red", linestyle='--', label='sPOD-NN')
-    axs[0, 0].plot(t, TA_interpolated[0][0, :Nt], color="blue", linestyle='--', label='sPOD-LI')
+    axs[0, 0].plot(t, TA_interpolated[0][0, :Nt], color="blue", linestyle='--', label='sPOD-I')
     axs[0, 0].set_xticks([0, t[-1] / 2, t[-1]])
     axs[0, 0].set_ylabel(r"$a_i^{k}(t,\mu)$")
     # axs[0, 0].set_title(r'${mode}^{(' + str(1) + ')}$')
@@ -422,7 +445,7 @@ def plot_pred_comb(time_amplitudes_1_pred, time_amplitudes_1_test, time_amplitud
 
     axs[0, 1].plot(t, time_amplitudes_2_test[0, :Nt], color="green", linestyle='-', label='actual')
     axs[0, 1].plot(t, time_amplitudes_2_pred[0, :Nt], color="red", linestyle='--', label='sPOD-NN')
-    axs[0, 1].plot(t, TA_interpolated[1][0, :Nt], color="blue", linestyle='--', label='sPOD-LI')
+    axs[0, 1].plot(t, TA_interpolated[1][0, :Nt], color="blue", linestyle='--', label='sPOD-I')
     axs[0, 1].set_xticks([0, t[-1] / 2, t[-1]])
     # axs[0, 1].set_ylabel(r"$a_i^{k}(t,\mu)$")
     # axs[0, 1].set_title(r'${mode}^{(' + str(1) + ')}$')
@@ -433,7 +456,7 @@ def plot_pred_comb(time_amplitudes_1_pred, time_amplitudes_1_test, time_amplitud
 
     axs[1, 0].plot(t, SHIFTS_TEST[0].flatten()[:Nt], color="green", linestyle='-', label='actual')
     axs[1, 0].plot(t, shifts_1_pred.flatten()[:Nt], color="red", linestyle='--', label='sPOD-NN')
-    axs[1, 0].plot(t, delta_pred_frame_wise[0][:Nt], color="blue", linestyle='--', label='sPOD-LI')
+    axs[1, 0].plot(t, delta_pred_frame_wise[0][:Nt], color="blue", linestyle='--', label='sPOD-I')
     axs[1, 0].set_xticks([0, t[-1] / 2, t[-1]])
     axs[1, 0].set_ylabel(r"space $x$")
     # axs[1, 0].set_title(r"$\Delta$")
@@ -444,7 +467,7 @@ def plot_pred_comb(time_amplitudes_1_pred, time_amplitudes_1_test, time_amplitud
 
     axs[1, 1].plot(t, SHIFTS_TEST[1].flatten()[:Nt], color="green", linestyle='-', label='actual')
     axs[1, 1].plot(t, shifts_3_pred.flatten()[:Nt], color="red", linestyle='--', label='sPOD-NN')
-    axs[1, 1].plot(t, delta_pred_frame_wise[2][:Nt], color="blue", linestyle='--', label='sPOD-LI')
+    axs[1, 1].plot(t, delta_pred_frame_wise[2][:Nt], color="blue", linestyle='--', label='sPOD-I')
     axs[1, 1].set_xticks([0, t[-1] / 2, t[-1]])
     # axs[1, 1].set_ylabel(r"space $x$")
     # axs[1, 1].set_title(r"$\Delta$")
@@ -454,7 +477,7 @@ def plot_pred_comb(time_amplitudes_1_pred, time_amplitudes_1_test, time_amplitud
     axs[1, 1].legend(loc='lower left')
 
     axs[2, 0].plot(t, TA_POD_TEST[0, :], color="green", linestyle='-', label='actual')
-    axs[2, 0].plot(t, POD_frame_amplitudes_predicted[0, :], color="red", linestyle='--', label='POD-NN')
+    axs[2, 0].plot(t, POD_frame_amplitudes_predicted[0, :], color="black", linestyle='--', label='POD-NN')
     axs[2, 0].set_xticks([0, t[-1] / 2, t[-1]])
     axs[2, 0].set_ylabel(r"$a_i^{k}(t,\mu)$")
     axs[2, 0].set_xticklabels(["0s", r"$1000s$", r"$2000s$"])
@@ -463,52 +486,16 @@ def plot_pred_comb(time_amplitudes_1_pred, time_amplitudes_1_test, time_amplitud
     axs[2, 0].grid()
 
     axs[2, 1].plot(t, TA_POD_TEST[1, :], color="green", linestyle='-', label='actual')
-    axs[2, 1].plot(t, POD_frame_amplitudes_predicted[1, :], color="red", linestyle='--', label='POD-NN')
+    axs[2, 1].plot(t, POD_frame_amplitudes_predicted[1, :], color="black", linestyle='--', label='POD-NN')
     axs[2, 1].set_xticks([0, t[-1] / 2, t[-1]])
     axs[2, 1].set_xticklabels(["0s", r"$1000s$", r"$2000s$"])
-    axs[2, 1].legend(loc='lower right')
+    axs[2, 1].legend(loc='upper right')
     axs[2, 1].set_xlabel(r"(f)")
     axs[2, 1].grid()
 
     fig.supxlabel(r"time $t$")
     save_fig(filepath=impath + "all_comb_pred", figure=fig)
     fig.savefig(impath + "all_comb_pred" + ".eps", format='eps', dpi=600, transparent=True)
-
-
-def plot_recons_snapshot(q_test, Q_recon_interp, Q_recon_sPOD, Q_recon_POD, x, t):
-    Nx = len(x)
-    Nt = len(t)
-
-    [Xgrid, Tgrid] = meshgrid(x, t)
-    Xgrid = Xgrid.T
-    Tgrid = Tgrid.T
-
-    qmin = np.min(q_test)
-    qmax = np.max(q_test)
-    fig, axs = plt.subplots(1, 4, num=11, sharey=True, figsize=(15, 6))
-    # Original
-    axs[0].pcolormesh(Xgrid, Tgrid, q_test, vmin=qmin, vmax=qmax, cmap=cmap)
-    axs[0].set_title(r"$Q^" + "{original}$")
-    axs[0].set_yticks([], [])
-    axs[0].set_xticks([], [])
-    # Interpolated
-    axs[1].pcolormesh(Xgrid, Tgrid, Q_recon_interp, vmin=qmin, vmax=qmax, cmap=cmap)
-    axs[1].set_title(r"$Q^" + "{interpolated}$")
-    axs[1].set_yticks([], [])
-    axs[1].set_xticks([], [])
-    # sPOD NN predicted
-    axs[2].pcolormesh(Xgrid, Tgrid, Q_recon_sPOD, vmin=qmin, vmax=qmax, cmap=cmap)
-    axs[2].set_title(r"$Q^" + "{sPOD}_{NN}$")
-    axs[2].set_yticks([], [])
-    axs[2].set_xticks([], [])
-    # POD NN predicted
-    axs[3].pcolormesh(Xgrid, Tgrid, Q_recon_POD, vmin=qmin, vmax=qmax, cmap=cmap)
-    axs[3].set_title(r"$Q^" + "{POD}_{NN}$")
-    axs[3].set_yticks([], [])
-    axs[3].set_xticks([], [])
-    plt.tight_layout()
-
-    save_fig(filepath=impath + "Snapshot_Comparison", figure=fig)
 
 
 def plot_recons_snapshot_cross_section(q_test, Q_recon_interp, Q_recon_sPOD, Q_recon_POD, x, t):
@@ -532,9 +519,9 @@ def plot_recons_snapshot_cross_section(q_test, Q_recon_interp, Q_recon_sPOD, Q_r
     ax1 = subfig_t.add_subplot(gs_t[0:4, 0])
     # Original
     ax1.pcolormesh(Xgrid, Tgrid, q_test, vmin=qmin, vmax=qmax, cmap=cmap)
-    ax1.axhline(y=t[Nt // 40], linestyle='--', color='r', label=r"$t=50s$")
-    ax1.axhline(y=t[3 * Nt // 4], linestyle='--', color='g', label=r"$t=1500s$")
-    ax1.set_title(r"$\mathrm{Q}$")
+    ax1.axhline(y=t[Nt // 40], linestyle='--', color='r', label=r"$t=35s$")
+    ax1.axhline(y=t[85 * Nt // 100], linestyle='--', color='g', label=r"$t=1190s$")
+    ax1.set_title(r"$Q$")
     ax1.set_yticks([], [])
     ax1.set_xticks([], [])
     ax1.legend(loc='upper center')
@@ -547,38 +534,38 @@ def plot_recons_snapshot_cross_section(q_test, Q_recon_interp, Q_recon_sPOD, Q_r
     ax4 = subfig_b.add_subplot(gs_b[0:2, 0])
     ax5 = subfig_b.add_subplot(gs_b[2:4, 0], sharex=ax4)
 
-    start = 150
-    end = 2850
+    start = 450
+    end = 2550
     x_trim = x[start:end]
-    ax4.plot(x_trim, q_test[start:end, 3 * Nt // 4], color="green", linestyle='-', label='actual')
-    ax4.plot(x_trim, Q_recon_sPOD[start:end, 3 * Nt // 4], color="red", linestyle='--', label='sPOD-NN')
-    ax4.plot(x_trim, Q_recon_POD[start:end, 3 * Nt // 4], color="black", linestyle='--', label='POD-NN')
-    ax4.plot(x_trim, Q_recon_interp[start:end, 3 * Nt // 4], color="blue", linestyle='--', label='sPOD-LI')
+    ax4.plot(x_trim, q_test[start:end, 85 * Nt // 100], color="green", linestyle='-', label='actual')
+    ax4.plot(x_trim, Q_recon_sPOD[start:end, 85 * Nt // 100], color="red", linestyle='--', label='sPOD-NN')
+    ax4.plot(x_trim, Q_recon_interp[start:end, 85 * Nt // 100], color="blue", linestyle='--', label='sPOD-I')
+    ax4.plot(x_trim, Q_recon_POD[start:end, 85 * Nt // 100], color="black", linestyle='--', label='POD-NN')
     axin2 = ax4.inset_axes([0.35, 0.2, 0.35, 0.35])
-    axin2.plot(x[510:680], q_test[510:680, 3 * Nt // 4], color="green", linestyle='-')
-    axin2.plot(x[510:680], Q_recon_interp[510:680, 3 * Nt // 4], color="blue", linestyle='--')
-    axin2.plot(x[510:680], Q_recon_sPOD[510:680, 3 * Nt // 4], color="red", linestyle='--')
-    axin2.plot(x[510:680], Q_recon_POD[510:680, 3 * Nt // 4], color="black", linestyle='--')
-    axin2.set_xlim(170, 220)
-    axin2.set_ylim(-100, 60)
+    axin2.plot(x[680:880], q_test[680:880, 85 * Nt // 100], color="green", linestyle='-')
+    axin2.plot(x[680:880], Q_recon_sPOD[680:880, 85 * Nt // 100], color="red", linestyle='--')
+    axin2.plot(x[680:880], Q_recon_interp[680:880, 85 * Nt // 100], color="blue", linestyle='--')
+    axin2.plot(x[680:880], Q_recon_POD[680:880, 85 * Nt // 100], color="black", linestyle='--')
+    axin2.set_xlim(230, 280)
+    axin2.set_ylim(-80, 60)
     axin2.set_xticks([], [])
     axin2.set_yticks([], [])
     ax4.indicate_inset_zoom(axin2)
     # axs[1].set_yticks([], [])
     # axs[1].set_xticks([], [])
-    ax4.set_title(r"$t=1500s$")
+    ax4.set_title(r"$t=1190s$")
 
     ax4.grid()
     ax4.legend(loc='upper center')
 
     ax5.plot(x_trim, q_test[start:end, Nt // 40], color="green", linestyle='-', label='actual')
     ax5.plot(x_trim, Q_recon_sPOD[start:end, Nt // 40], color="red", linestyle='--', label='sPOD-NN')
+    ax5.plot(x_trim, Q_recon_interp[start:end, Nt // 40], color="blue", linestyle='--', label='sPOD-I')
     ax5.plot(x_trim, Q_recon_POD[start:end, Nt // 40], color="black", linestyle='--', label='POD-NN')
-    ax5.plot(x_trim, Q_recon_interp[start:end, Nt // 40], color="blue", linestyle='--', label='sPOD-LI')
     axin = ax5.inset_axes([0.6, 0.2, 0.35, 0.35])
     axin.plot(x[1560:1710], q_test[1560:1710, Nt // 40], color="green", linestyle='-')
-    axin.plot(x[1560:1710], Q_recon_interp[1560:1710, Nt // 40], color="blue", linestyle='--')
     axin.plot(x[1560:1710], Q_recon_sPOD[1560:1710, Nt // 40], color="red", linestyle='--')
+    axin.plot(x[1560:1710], Q_recon_interp[1560:1710, Nt // 40], color="blue", linestyle='--')
     axin.plot(x[1560:1710], Q_recon_POD[1560:1710, Nt // 40], color="black", linestyle='--')
     axin.set_xlim(520, 570)
     axin.set_ylim(-100, 100)
@@ -587,7 +574,7 @@ def plot_recons_snapshot_cross_section(q_test, Q_recon_interp, Q_recon_sPOD, Q_r
     ax5.indicate_inset_zoom(axin)
     # axs[2].set_yticks([], [])
     # axs[2].set_xticks([], [])
-    ax5.set_title(r"$t=50s$")
+    ax5.set_title(r"$t=35s$")
     ax5.grid()
     ax5.legend(loc='upper left')
 

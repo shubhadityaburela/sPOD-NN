@@ -8,6 +8,7 @@ os.makedirs(impath, exist_ok=True)
 data_path = os.path.abspath(".") + '/wildfire_data/2D/'
 
 cmap = 'YlOrRd'
+
 # cmap = 'YlGn'
 
 
@@ -77,10 +78,10 @@ class wildfire2D_sup:
 
         # Map the field variable from cartesian to polar coordinate system
         q_polar = []
-        s0, theta_i, r_i = cartesian_to_polar(self.q_train[0], self.x, self.y, self.t)
+        s0, theta_i, r_i, _ = cartesian_to_polar(self.q_train[0], self.x, self.y, self.t)
         q_polar.append(s0)
         for samples in range(self.Nsamples_train - 1):
-            s, _, _ = cartesian_to_polar(self.q_train[samples + 1], self.x, self.y, self.t)
+            s, _, _, _ = cartesian_to_polar(self.q_train[samples + 1], self.x, self.y, self.t)
             q_polar.append(s)
 
         data_shape = [self.Nx, self.Ny, 1, self.Nsamples_train * self.Nt]
@@ -107,7 +108,7 @@ class wildfire2D_sup:
         sPOD_frames_train, qtilde_train, rel_err_train = ret.frames, ret.data_approx, ret.rel_err_hist
         self.q_polar_train = qmat
         ###########################################
-        # Calculate the time amplitudes for training wildfire_data
+        # Calculate the time amplitudes for training data
         U_list = []
         spod_modes = []
         frame_amplitude_list_interpolation = []
@@ -125,10 +126,6 @@ class wildfire2D_sup:
             spod_modes.append(Nmodes)
             cnt = cnt + 1
 
-        q_spod_frames = [sPOD_frames_train[0].build_field(),
-                         sPOD_frames_train[1].build_field(),
-                         qtilde_train]
-
         return U_list, frame_amplitude_list_training, frame_amplitude_list_interpolation, spod_modes
 
     def test_data(self, spod_iter):
@@ -137,10 +134,10 @@ class wildfire2D_sup:
         q = np.reshape(self.q_test, newshape=[self.Nx, self.Ny, 1, self.Nt], order="F")
 
         # Map the field variable from cartesian to polar coordinate system
-        q_polar, theta_i, r_i = cartesian_to_polar(q, self.x, self.y, self.t)
+        q_polar, theta_i, r_i, aux = cartesian_to_polar(q, self.x, self.y, self.t)
 
         # Check the transformation back and forth error between polar and cartesian coordinates (Checkpoint)
-        q_cartesian = polar_to_cartesian(q_polar, self.x, self.y, theta_i, r_i, self.x_c, self.y_c, self.t)
+        q_cartesian = polar_to_cartesian(q_polar, self.t, aux=aux)
         res = q - q_cartesian
         err = np.linalg.norm(np.reshape(res, -1)) / np.linalg.norm(np.reshape(q, -1))
         print("Transformation back and forth error (cartesian - polar - cartesian) =  %4.4e " % err)
@@ -184,9 +181,9 @@ class wildfire2D_sup:
         q_frame_2_lab = transform_list[1].apply(np.reshape(q_frame_2, newshape=data_shape))
 
         # Shift the pre-transformed polar data to cartesian grid to visualize
-        q_frame_1_cart_lab = polar_to_cartesian(q_frame_1_lab, self.x, self.y, theta_i, r_i, self.x_c, self.y_c, self.t)
-        q_frame_2_cart_lab = polar_to_cartesian(q_frame_2_lab, self.x, self.y, theta_i, r_i, self.x_c, self.y_c, self.t)
-        qtilde_cart = polar_to_cartesian(qtilde, self.x, self.y, theta_i, r_i, self.x_c, self.y_c, self.t)
+        q_frame_1_cart_lab = polar_to_cartesian(q_frame_1_lab, self.t, aux=aux)
+        q_frame_2_cart_lab = polar_to_cartesian(q_frame_2_lab, self.t, aux=aux)
+        qtilde_cart = polar_to_cartesian(qtilde, self.t, aux=aux)
 
         # Relative reconstruction error for sPOD
         res = q - qtilde_cart
@@ -196,7 +193,7 @@ class wildfire2D_sup:
         Q_frames_test_polar = [q_frame_1, q_frame_2, qtilde_test]
         Q_frames_test_cart = [q_frame_1_cart_lab, q_frame_2_cart_lab, qtilde_cart]
 
-        return Q_frames_test_polar, Q_frames_test_cart
+        return Q_frames_test_polar, Q_frames_test_cart, aux
 
     def plot_sPOD_frames(self, Q_frames_test_cart, plot_every=10, var_name="T"):
         q = np.reshape(self.q_test, newshape=[self.Nx, self.Ny, 1, self.Nt], order="F")
@@ -245,7 +242,33 @@ class wildfire2D_sup:
 
     def plot_online_data(self, frame_amplitude_predicted_sPOD, frame_amplitude_predicted_POD,
                          TA_TEST, TA_POD_TEST, TA_list_interp, shifts_predicted, SHIFTS_TEST, spod_modes,
-                         U_list, U_POD_TRAIN, q_test_polar, Q_frames_test_polar, plot_online=False):
+                         U_list, U_POD_TRAIN, q_test_polar, Q_frames_test_polar, aux, plot_online=False,
+                         test_type=None):
+
+        Ndims = 2
+        Nt = frame_amplitude_predicted_sPOD.shape[1]
+        Q = np.reshape(self.q_test, newshape=[self.Nx, self.Ny, 1, self.Nt], order="F")
+        q_test_polar = np.reshape(q_test_polar, newshape=[self.Nx, self.Ny, 1, self.Nt])
+        if test_type['typeOfTest'] == "query":
+            test_sample = test_type['test_sample']
+
+            tmp_Tr = []
+            tmp_Te = []
+            for frame in range(self.NumFrames):
+                tt_Tr = []
+                tt_Te = []
+                for dim in range(Ndims):
+                    ampl_Tr = np.asarray([self.shifts_train[frame][dim][i * self.Nt + test_sample]
+                                          for i in range(self.Nsamples_train)])
+                    ampl_Te = self.shifts_test[frame][dim][test_sample][np.newaxis]
+                    tt_Tr.append(ampl_Tr)
+                    tt_Te.append(ampl_Te)
+                tmp_Tr.append(tt_Tr)
+                tmp_Te.append(tt_Te)
+            self.shifts_train = tmp_Tr
+            self.shifts_test = tmp_Te
+            q_test_polar = q_test_polar[..., 0, test_sample][..., np.newaxis, np.newaxis]
+            Q = Q[..., 0, test_sample][..., np.newaxis, np.newaxis]
 
         print("#############################################")
         print('Online Error checks')
@@ -265,14 +288,15 @@ class wildfire2D_sup:
         dtheta = theta_i[1] - theta_i[0]
         d_del = np.asarray([dr, dtheta])
         L = np.asarray([r_i[-1], theta_i[-1]])
-        data_shape = [self.Nx, self.Ny, 1, self.Nt]
-        Ndims = 2
+        data_shape = [self.Nx, self.Ny, 1, Nt]
 
         # Implement the interpolation to find the online prediction
+        tic_I = time.process_time()
         shifts_list_interpolated = []
         for frame in range(self.NumFrames):
             for dim in range(Ndims):
-                shifts_list_interpolated.append(np.reshape(self.shifts_train[frame][dim], [self.Nsamples_train, self.Nt]).T)
+                shifts_list_interpolated.append(
+                    np.reshape(self.shifts_train[frame][dim], [self.Nsamples_train, Nt]).T)
 
         DELTA = my_delta_interpolate(shifts_list_interpolated, self.mu_vecs_train, self.mu_vecs_test)
         DELTA_PRED_FRAME_WISE = np.zeros_like(self.shifts_test)
@@ -281,6 +305,7 @@ class wildfire2D_sup:
         DELTA_PRED_FRAME_WISE[1][0] = DELTA[2]
         DELTA_PRED_FRAME_WISE[1][1] = DELTA[3]
 
+        tic_trafo_1 = time.process_time()
         trafo_interpolated_1 = transforms(data_shape, L, shifts=DELTA_PRED_FRAME_WISE[0],
                                           dx=d_del,
                                           use_scipy_transform=True,
@@ -289,79 +314,73 @@ class wildfire2D_sup:
                                           dx=d_del,
                                           use_scipy_transform=True,
                                           interp_order=5)
-
+        toc_trafo_1 = time.process_time()
         trafos_interpolated = [trafo_interpolated_1, trafo_interpolated_2]
-
         QTILDE_FRAME_WISE, TA_INTERPOLATED = my_interpolated_state(spod_modes, U_list,
                                                                    TA_list_interp, self.mu_vecs_train,
-                                                                   self.Nx, self.Ny, self.Nt, self.mu_vecs_test,
+                                                                   self.Nx, self.Ny, Nt, self.mu_vecs_test,
                                                                    trafos_interpolated)
+        toc_I = time.process_time()
 
         # Shifts error
-        num1 = np.sqrt(np.mean(np.linalg.norm(SHIFTS_TEST.flatten() - shifts_1_pred.flatten(), 2, axis=0) ** 2))
-        den1 = np.sqrt(np.mean(np.linalg.norm(SHIFTS_TEST.flatten(), 2, axis=0) ** 2))
-        num1_i = np.sqrt(np.mean(np.linalg.norm(SHIFTS_TEST.flatten() - DELTA_PRED_FRAME_WISE[0][0].flatten(), 2, axis=0) ** 2))
-        den1_i = np.sqrt(np.mean(np.linalg.norm(SHIFTS_TEST.flatten(), 2, axis=0) ** 2))
+        num1 = np.linalg.norm(SHIFTS_TEST.flatten() - shifts_1_pred.flatten())
+        den1 = np.linalg.norm(SHIFTS_TEST.flatten())
+        num1_i = np.linalg.norm(SHIFTS_TEST.flatten() - DELTA_PRED_FRAME_WISE[0][0].flatten())
+        den1_i = np.linalg.norm(SHIFTS_TEST.flatten())
         print('Check 1...')
         print("Relative error indicator for shift for frame 1 (sPOD-NN): {}".format(num1 / den1))
-        print("Relative error indicator for shift for frame 1 (sPOD-LI): {}".format(num1_i / den1_i))
+        print("Relative error indicator for shift for frame 1 (sPOD-I): {}".format(num1_i / den1_i))
 
         # Time amplitudes error
         time_amplitudes_1_test = TA_TEST[:Nmf[0], :]
         time_amplitudes_2_test = TA_TEST[Nmf[0]:, :]
-        num1 = np.sqrt(np.mean(np.linalg.norm(time_amplitudes_1_test - time_amplitudes_1_pred, 2, axis=1) ** 2))
-        den1 = np.sqrt(np.mean(np.linalg.norm(time_amplitudes_1_test, 2, axis=1) ** 2))
-        num2 = np.sqrt(np.mean(np.linalg.norm(time_amplitudes_2_test - time_amplitudes_2_pred, 2, axis=1) ** 2))
-        den2 = np.sqrt(np.mean(np.linalg.norm(time_amplitudes_2_test, 2, axis=1) ** 2))
-        num1_i = np.sqrt(np.mean(np.linalg.norm(time_amplitudes_1_test - TA_INTERPOLATED[0], 2, axis=1) ** 2))
-        den1_i = np.sqrt(np.mean(np.linalg.norm(time_amplitudes_1_test, 2, axis=1) ** 2))
-        num2_i = np.sqrt(np.mean(np.linalg.norm(time_amplitudes_2_test - TA_INTERPOLATED[1], 2, axis=1) ** 2))
-        den2_i = np.sqrt(np.mean(np.linalg.norm(time_amplitudes_2_test, 2, axis=1) ** 2))
-        num3 = np.sqrt(np.mean(np.linalg.norm(TA_POD_TEST - frame_amplitude_predicted_POD, 2, axis=1) ** 2))
-        den3 = np.sqrt(np.mean(np.linalg.norm(TA_POD_TEST, 2, axis=1) ** 2))
+        num1 = np.linalg.norm(time_amplitudes_1_test - time_amplitudes_1_pred)
+        den1 = np.linalg.norm(time_amplitudes_1_test)
+        num2 = np.linalg.norm(time_amplitudes_2_test - time_amplitudes_2_pred)
+        den2 = np.linalg.norm(time_amplitudes_2_test)
+        num1_i = np.linalg.norm(np.squeeze(time_amplitudes_1_test) - TA_INTERPOLATED[0])
+        den1_i = np.linalg.norm(np.squeeze(time_amplitudes_1_test))
+        num2_i = np.linalg.norm(np.squeeze(time_amplitudes_2_test) - TA_INTERPOLATED[1])
+        den2_i = np.linalg.norm(np.squeeze(time_amplitudes_2_test))
+        num3 = np.linalg.norm(TA_POD_TEST - frame_amplitude_predicted_POD)
+        den3 = np.linalg.norm(TA_POD_TEST)
         print('Check 2...')
         print("Relative time amplitude error indicator (polar) for frame 1 (sPOD-NN): {}".format(num1 / den1))
         print("Relative time amplitude error indicator (polar) for frame 2 (sPOD-NN): {}".format(num2 / den2))
-        print("Relative time amplitude error indicator (polar) for frame 1 (sPOD-LI): {}".format(num1_i / den1_i))
-        print("Relative time amplitude error indicator (polar) for frame 2 (sPOD-LI): {}".format(num2_i / den2_i))
+        print("Relative time amplitude error indicator (polar) for frame 1 (sPOD-I): {}".format(num1_i / den1_i))
+        print("Relative time amplitude error indicator (polar) for frame 2 (sPOD-I): {}".format(num2_i / den2_i))
         print("Relative time amplitude error indicator (polar) (POD-NN): {}".format(num3 / den3))
 
-        # Frame wise error
+        tic_sPOD = time.process_time()
         q1_pred = U_list[0] @ time_amplitudes_1_pred
         q2_pred = U_list[1] @ time_amplitudes_2_pred
-
         use_original_shift = False
         NumFrames = 2
-        data_shape = [self.Nx, self.Ny, 1, self.Nt]
+        data_shape = [self.Nx, self.Ny, 1, Nt]
         Q_pred = [np.reshape(q1_pred, newshape=data_shape), np.reshape(q2_pred, newshape=data_shape)]
-        q_test_polar = np.reshape(q_test_polar, newshape=data_shape)
         Q_recon_sPOD_polar = np.zeros_like(q_test_polar)
         if use_original_shift:
             shifts = self.shifts_test
         else:
-            shifts = self.shifts_test
+            shifts = np.zeros_like(self.shifts_test)
             shifts[0][0] = shifts_1_pred
 
-        trafos = [
-            transforms(data_shape, L, shifts=shifts[0],
-                       dx=d_del,
-                       use_scipy_transform=True,
-                       interp_order=5),
-            transforms(data_shape, L, shifts=shifts[1],
-                       trafo_type="identity", dx=d_del,
-                       use_scipy_transform=True,
-                       interp_order=5)
-        ]
-
+        tic_trafo_2 = time.process_time()
+        trafos_1 = transforms(data_shape, L, shifts=shifts[0],
+                              dx=d_del,
+                              use_scipy_transform=True,
+                              interp_order=5)
+        trafos_2 = transforms(data_shape, L, shifts=shifts[1],
+                              trafo_type="identity", dx=d_del,
+                              use_scipy_transform=True,
+                              interp_order=5)
+        toc_trafo_2 = time.process_time()
+        trafos = [trafos_1, trafos_2]
         for frame in range(NumFrames):
             Q_recon_sPOD_polar += trafos[frame].apply(Q_pred[frame])
+        toc_sPOD = time.process_time()
         res = q_test_polar - Q_recon_sPOD_polar
         err_full_sPOD = np.linalg.norm(np.reshape(res, -1)) / np.linalg.norm(np.reshape(q_test_polar, -1))
-
-        Q_recon_POD_polar = U_POD_TRAIN @ frame_amplitude_predicted_POD
-        Q_recon_POD_polar = np.reshape(Q_recon_POD_polar, newshape=data_shape)
-        res = q_test_polar - Q_recon_POD_polar
-        err_full_POD = np.linalg.norm(np.reshape(res, -1)) / np.linalg.norm(np.reshape(q_test_polar, -1))
 
         res = q_test_polar - QTILDE_FRAME_WISE
         err_full_interp = np.linalg.norm(np.reshape(res, -1)) / np.linalg.norm(np.reshape(q_test_polar, -1))
@@ -369,29 +388,28 @@ class wildfire2D_sup:
         print('Check 3...')
         print("Relative reconstruction error indicator for full snapshot (polar) (sPOD-NN): {}".format(err_full_sPOD))
         print(
-            "Relative reconstruction error indicator for full snapshot (polar) (sPOD-LI) (polar) is {}".format(err_full_interp))
-        print("Relative reconstruction error indicator for full snapshot (polar) (POD-NN) (polar) is {}".format(err_full_POD))
-
-        num1 = [np.abs(q_test_polar[:, :, 0, n].flatten() - Q_recon_sPOD_polar[:, :, 0, n].flatten()) for n in range(self.Nt)]
-        den1 = np.sqrt(sum([np.square(np.linalg.norm((q_test_polar[:, :, 0, n].flatten()))) for n in range(self.Nt)]) / self.Nt)
-        num2 = [np.abs(q_test_polar[:, :, 0, n].flatten() - Q_recon_POD_polar[:, :, 0, n].flatten()) for n in range(self.Nt)]
-        den2 = np.sqrt(sum([np.square(np.linalg.norm((q_test_polar[:, :, 0, n].flatten()))) for n in range(self.Nt)]) / self.Nt)
-        num3 = [np.abs(q_test_polar[:, :, 0, n].flatten() - QTILDE_FRAME_WISE[:, :, 0, n].flatten()) for n in
-                range(self.Nt)]
-        den3 = np.sqrt(
-            sum([np.square(np.linalg.norm((q_test_polar[:, :, 0, n].flatten()))) for n in range(self.Nt)]) / self.Nt)
-        rel_err_sPOD_pol = [x / den1 for x in num1]
-        rel_err_POD_pol = [x / den2 for x in num2]
-        rel_err_interp_pol = [x / den3 for x in num3]
+            "Relative reconstruction error indicator for full snapshot (polar) (sPOD-I): {}".format(err_full_interp))
 
         # Convert the polar data into cartesian data
-        Q = np.reshape(self.q_test, newshape=[self.Nx, self.Ny, 1, self.Nt], order="F")
-        Q_recon_sPOD_cart = polar_to_cartesian(Q_recon_sPOD_polar, self.x, self.y, theta_i, r_i,
-                                               self.x_c, self.y_c, self.t)
-        Q_recon_POD_cart = polar_to_cartesian(Q_recon_POD_polar, self.x, self.y, theta_i, r_i,
-                                              self.x_c, self.y_c, self.t)
-        Q_recon_interp_cart = polar_to_cartesian(QTILDE_FRAME_WISE, self.x, self.y, theta_i, r_i,
-                                                 self.x_c, self.y_c, self.t)
+        tic_sPOD_cart = time.process_time()
+        Q_recon_sPOD_cart = polar_to_cartesian(Q_recon_sPOD_polar, self.t, aux=aux,
+                                               t_exact=test_type['test_sample']
+                                               if test_type['typeOfTest'] == "query" else None
+                                               )
+        toc_sPOD_cart = time.process_time()
+
+        tic_POD = time.process_time()
+        Q_recon_POD_cart = U_POD_TRAIN @ frame_amplitude_predicted_POD
+        Q_recon_POD_cart = np.reshape(Q_recon_POD_cart, newshape=data_shape)
+        toc_POD = time.process_time()
+
+        tic_I_cart = time.process_time()
+        Q_recon_interp_cart = polar_to_cartesian(QTILDE_FRAME_WISE, self.t, aux=aux,
+                                                 t_exact=test_type['test_sample']
+                                                 if test_type['typeOfTest'] == "query" else None
+                                                 )
+        toc_I_cart = time.process_time()
+
         res = Q - Q_recon_sPOD_cart
         err_full_sPOD = np.linalg.norm(np.reshape(res, -1)) / np.linalg.norm(np.reshape(Q, -1))
         res = Q - Q_recon_POD_cart
@@ -401,22 +419,22 @@ class wildfire2D_sup:
         print('Check 4...')
         print("Relative reconstruction error indicator for full snapshot (cartesian) (sPOD-NN): {}".format(
             err_full_sPOD))
-        print("Relative reconstruction error indicator for full snapshot (cartesian) (sPOD-LI): {}".format(
+        print("Relative reconstruction error indicator for full snapshot (cartesian) (sPOD-I): {}".format(
             err_full_interp))
         print("Relative reconstruction error indicator for full snapshot (cartesian) (POD-NN): {}".format(err_full_POD))
 
         num1 = [np.abs(Q[:, :, 0, n].flatten() - Q_recon_sPOD_cart[:, :, 0, n].flatten()) for n in
-                range(self.Nt)]
+                range(Nt)]
         den1 = np.sqrt(
-            sum([np.square(np.linalg.norm((Q[:, :, 0, n].flatten()))) for n in range(self.Nt)]) / self.Nt)
+            sum([np.square(np.linalg.norm((Q[:, :, 0, n].flatten()))) for n in range(Nt)]) / Nt)
         num2 = [np.abs(Q[:, :, 0, n].flatten() - Q_recon_POD_cart[:, :, 0, n].flatten()) for n in
-                range(self.Nt)]
+                range(Nt)]
         den2 = np.sqrt(
-            sum([np.square(np.linalg.norm((Q[:, :, 0, n].flatten()))) for n in range(self.Nt)]) / self.Nt)
+            sum([np.square(np.linalg.norm((Q[:, :, 0, n].flatten()))) for n in range(Nt)]) / Nt)
         num3 = [np.abs(Q[:, :, 0, n].flatten() - Q_recon_interp_cart[:, :, 0, n].flatten()) for n in
-                range(self.Nt)]
+                range(Nt)]
         den3 = np.sqrt(
-            sum([np.square(np.linalg.norm((Q[:, :, 0, n].flatten()))) for n in range(self.Nt)]) / self.Nt)
+            sum([np.square(np.linalg.norm((Q[:, :, 0, n].flatten()))) for n in range(Nt)]) / Nt)
         rel_err_sPOD_cart = [x / den1 for x in num1]
         rel_err_POD_cart = [x / den2 for x in num2]
         rel_err_interp_cart = [x / den3 for x in num3]
@@ -427,28 +445,40 @@ class wildfire2D_sup:
                            time_amplitudes_2_test, TA_INTERPOLATED, shifts_1_pred, SHIFTS_TEST,
                            frame_amplitude_predicted_POD, TA_POD_TEST, self.x, self.t)
 
-        errors = [rel_err_sPOD_pol, rel_err_POD_pol, rel_err_interp_pol, rel_err_sPOD_cart,
-                  rel_err_POD_cart, rel_err_interp_cart]
+        errors = [rel_err_sPOD_cart, rel_err_POD_cart, rel_err_interp_cart]
+
+        print('Timing...')
+        print(
+            f"Time consumption in assembling the transformation operators (sPOD-NN) : {toc_trafo_2 - tic_trafo_2:0.4f} seconds")
+        print(
+            f"Time consumption in assembling the transformation operators (sPOD-I) : {toc_trafo_1 - tic_trafo_1:0.4f} seconds")
+        print(
+            f"Time consumption in assembling the final solution (sPOD-NN) : {((toc_sPOD - tic_sPOD) - (toc_trafo_2 - tic_trafo_2)):0.4f} seconds")
+        print(
+            f"Time consumption in assembling the final solution (sPOD-I)  : {((toc_I - tic_I) - (toc_trafo_1 - tic_trafo_1)):0.4f} seconds")
+        print(f"Time consumption in assembling the final solution (POD-NN)  : {(toc_POD - tic_POD):0.4f} seconds")
+        print(
+            f"Time consumption in converting from cart-polar-cart  : {(2 * (toc_sPOD_cart - tic_sPOD_cart)):0.4f} seconds")
 
         return Q_recon_sPOD_cart, Q_recon_POD_cart, Q_recon_interp_cart, errors
 
     def plot_recon(self, Q_recon_sPOD_cart, Q_recon_POD_cart, Q_recon_interp_cart, t_a=10, t_b=100, var_name="T"):
         q = np.reshape(self.q_test, newshape=[self.Nx, self.Ny, 1, self.Nt], order="F")
 
-        min_a = np.min(q[..., 0, t_a-1])
-        max_a = np.max(q[..., 0, t_a-1])
+        min_a = np.min(q[..., 0, t_a - 1])
+        max_a = np.max(q[..., 0, t_a - 1])
 
-        min_b = np.min(q[..., 0, t_b-1])
-        max_b = np.max(q[..., 0, t_b-1])
+        min_b = np.min(q[..., 0, t_b - 1])
+        max_b = np.max(q[..., 0, t_b - 1])
 
-        fig = plt.figure(figsize=(10, 10), constrained_layout=True)
+        fig = plt.figure(figsize=(11, 11), constrained_layout=True)
         (subfig_t, subfig_b) = fig.subfigures(2, 1, hspace=0.05, wspace=0.1)
 
         gs_t = subfig_t.add_gridspec(nrows=1, ncols=4)
         ax1 = subfig_t.add_subplot(gs_t[0, 0:2])
         ax2 = subfig_t.add_subplot(gs_t[0, 2:4], sharex=ax1, sharey=ax1)
 
-        ax1.pcolormesh(self.X, self.Y, np.squeeze(q[:, :, 0, t_a-1]), vmin=min_a, vmax=max_a, cmap=cmap)
+        ax1.pcolormesh(self.X, self.Y, np.squeeze(q[:, :, 0, t_a - 1]), vmin=min_a, vmax=max_a, cmap=cmap)
         ax1.axis('scaled')
         ax1.set_title(r"$t=100s$")
         ax1.set_yticks([], [])
@@ -458,7 +488,7 @@ class wildfire2D_sup:
         # cax = divider.append_axes('right', size='5%', pad=0.08)
         # fig.colorbar(im1, cax=cax, orientation='vertical')
 
-        ax2.pcolormesh(self.X, self.Y, np.squeeze(q[:, :, 0, t_b-1]), vmin=min_b, vmax=max_b, cmap=cmap)
+        ax2.pcolormesh(self.X, self.Y, np.squeeze(q[:, :, 0, t_b - 1]), vmin=min_b, vmax=max_b, cmap=cmap)
         ax2.axis('scaled')
         ax2.set_title(r"$t=1000s$")
         ax2.set_yticks([], [])
@@ -475,20 +505,24 @@ class wildfire2D_sup:
         ax4 = subfig_b.add_subplot(gs_b[0, 0:2])
         ax5 = subfig_b.add_subplot(gs_b[0, 2:4], sharex=ax4)
 
-        ax4.plot(self.x, np.squeeze(q[:, self.Ny // 2, 0, t_a-1]), color="green", linestyle="-", label='actual')
-        ax4.plot(self.x, np.squeeze(Q_recon_sPOD_cart[:, self.Ny // 2, 0, t_a-1]), color="red", linestyle="--", label='sPOD-NN')
-        ax4.plot(self.x, np.squeeze(Q_recon_POD_cart[:, self.Ny // 2, 0, t_a-1]), color="black", linestyle="-.", label='POD-NN')
+        ax4.plot(self.x, np.squeeze(q[:, self.Ny // 2, 0, t_a - 1]), color="green", linestyle="-", label='actual')
+        ax4.plot(self.x, np.squeeze(Q_recon_sPOD_cart[:, self.Ny // 2, 0, t_a - 1]), color="red", linestyle="--",
+                 label='sPOD-NN')
         ax4.plot(self.x, np.squeeze(Q_recon_interp_cart[:, self.Ny // 2, 0, t_a - 1]), color="blue", linestyle="-.",
-                 label='sPOD-LI')
+                 label='sPOD-I')
+        ax4.plot(self.x, np.squeeze(Q_recon_POD_cart[:, self.Ny // 2, 0, t_a - 1]), color="black", linestyle="-.",
+                 label='POD-NN')
         ax4.set_ylim(bottom=min_a - 100, top=max_a + 300)
         ax4.legend()
         ax4.grid()
 
-        ax5.plot(self.x, np.squeeze(q[:, self.Ny // 2, 0, t_b-1]), color="green", linestyle="-", label='actual')
-        ax5.plot(self.x, np.squeeze(Q_recon_sPOD_cart[:, self.Ny // 2, 0, t_b-1]), color="red", linestyle="--", label='sPOD-NN')
-        ax5.plot(self.x, np.squeeze(Q_recon_POD_cart[:, self.Ny // 2, 0, t_b-1]), color="black", linestyle="-.", label='POD-NN')
+        ax5.plot(self.x, np.squeeze(q[:, self.Ny // 2, 0, t_b - 1]), color="green", linestyle="-", label='actual')
+        ax5.plot(self.x, np.squeeze(Q_recon_sPOD_cart[:, self.Ny // 2, 0, t_b - 1]), color="red", linestyle="--",
+                 label='sPOD-NN')
         ax5.plot(self.x, np.squeeze(Q_recon_interp_cart[:, self.Ny // 2, 0, t_b - 1]), color="blue", linestyle="-.",
-                 label='sPOD-LI')
+                 label='sPOD-I')
+        ax5.plot(self.x, np.squeeze(Q_recon_POD_cart[:, self.Ny // 2, 0, t_b - 1]), color="black", linestyle="-.",
+                 label='POD-NN')
         ax5.set_ylim(bottom=min_b - 100, top=max_b + 300)
         ax5.legend()
         ax5.grid()
@@ -518,7 +552,7 @@ def plot_pred_comb(time_amplitudes_1_pred, time_amplitudes_1_test, time_amplitud
 
     ax1.plot(t, time_amplitudes_1_test[0, :Nt], color="green", linestyle='-', label='actual')
     ax1.plot(t, time_amplitudes_1_pred[0, :Nt], color="red", linestyle='--', label='sPOD-NN')
-    ax1.plot(t, TA_interpolated[0][0, :Nt], color="blue", linestyle='--', label='sPOD-LI')
+    ax1.plot(t, TA_interpolated[0][0, :Nt], color="blue", linestyle='--', label='sPOD-I')
     ax1.set_xticks([0, t[-1] / 2, t[-1]])
     ax1.set_ylabel(r"$a_i^{k}(t,\mu)$")
     ax1.set_xticklabels([r"$0s$", r"$1000s$", r"$2000s$"])
@@ -528,7 +562,7 @@ def plot_pred_comb(time_amplitudes_1_pred, time_amplitudes_1_test, time_amplitud
 
     ax2.plot(t, time_amplitudes_2_test[0, :Nt], color="green", linestyle='-', label='actual')
     ax2.plot(t, time_amplitudes_2_pred[0, :Nt], color="red", linestyle='--', label='sPOD-NN')
-    ax2.plot(t, TA_interpolated[1][0, :Nt], color="blue", linestyle='--', label='sPOD-LI')
+    ax2.plot(t, TA_interpolated[1][0, :Nt], color="blue", linestyle='--', label='sPOD-I')
     ax2.set_xticks([0, t[-1] / 2, t[-1]])
     ax2.set_xticklabels([r"$0s$", r"$1000s$", r"$2000s$"])
     ax2.set_xlabel(r"(b)")
@@ -536,20 +570,20 @@ def plot_pred_comb(time_amplitudes_1_pred, time_amplitudes_1_test, time_amplitud
     ax2.legend(loc='upper right')
 
     ax3.plot(t, TA_POD_TEST[0, :], color="green", linestyle='-', label='actual')
-    ax3.plot(t, POD_frame_amplitudes_predicted[0, :], color="red", linestyle='--', label='POD-NN')
+    ax3.plot(t, POD_frame_amplitudes_predicted[0, :], color="black", linestyle='--', label='POD-NN')
     ax3.set_xticks([0, t[-1] / 2, t[-1]])
     ax3.set_ylabel(r"$a_i^{k}(t,\mu)$")
     ax3.set_xticklabels(["0s", r"$1000s$", r"$2000s$"])
     ax3.set_xlabel(r"(c)")
-    ax3.legend(loc='upper right')
+    ax3.legend(loc='upper left')
     ax3.grid()
 
     ax4.plot(t, TA_POD_TEST[1, :], color="green", linestyle='-', label='actual')
-    ax4.plot(t, POD_frame_amplitudes_predicted[1, :], color="red", linestyle='--', label='POD-NN')
+    ax4.plot(t, POD_frame_amplitudes_predicted[1, :], color="black", linestyle='--', label='POD-NN')
     ax4.set_xticks([0, t[-1] / 2, t[-1]])
     ax4.set_xticklabels(["0s", r"$1000s$", r"$2000s$"])
     ax4.set_xlabel(r"(d)")
-    ax4.legend(loc='lower right')
+    ax4.legend(loc='lower left')
     ax4.grid()
 
     ax5.plot(t, SHIFTS_TEST.flatten()[:Nt], color="green", linestyle='-', label='actual')
@@ -567,8 +601,7 @@ def plot_pred_comb(time_amplitudes_1_pred, time_amplitudes_1_test, time_amplitud
     fig.savefig(impath + "all_comb_pred" + ".eps", format='eps', dpi=600, transparent=True)
 
 
-def cartesian_to_polar(cartesian_data, X, Y, t, method=2):
-
+def cartesian_to_polar(cartesian_data, X, Y, t, t_exact=None):
     Nx = np.size(X)
     Ny = np.size(Y)
     Nt = np.size(t)
@@ -576,9 +609,7 @@ def cartesian_to_polar(cartesian_data, X, Y, t, method=2):
     X_c = X[-1] // 2
     Y_c = Y[-1] // 2
     polar_data = np.zeros_like(cartesian_data)
-
-    # Method 1 seems to run into problems of coordinate ordering (while correcting, look at the
-    # 'F' and 'C' ordering problem)
+    aux = []
 
     X_new = X_grid - X_c  # Shift the origin to the center of the image
     Y_new = Y_grid - Y_c
@@ -588,95 +619,39 @@ def cartesian_to_polar(cartesian_data, X, Y, t, method=2):
     # Make a regular (in polar space) grid based on the min and max r & theta
     r_i = np.linspace(np.min(r), np.max(r), Nx)
     theta_i = np.linspace(np.min(theta), np.max(theta), Ny)
-    theta_grid, r_grid = np.meshgrid(theta_i, r_i)
 
-    # Project the r and theta grid back into cartesian coordinates
-    xi, yi = r_grid * np.cos(theta_grid), r_grid * np.sin(theta_grid)
-    xi = xi + X_c  # Shift the origin back to the lower left corner
-    yi = yi + Y_c
-
-    if method == 1:
-        from scipy.ndimage.interpolation import map_coordinates
-        xi, yi = xi.flatten(), yi.flatten()
-        coords = np.vstack((xi, yi))
-
-        # Reproject the data into polar coordinates
-        for k in range(Nt):
-            data = map_coordinates(cartesian_data[..., 0, k], coords, order=5)
-            data = np.reshape(data, newshape=[Nx, Ny])
-            polar_data[..., 0, k] = data
-    elif method == 2:
-        from scipy.interpolate import griddata
-        # Reproject the data into polar coordinates
+    import polarTransform
+    if t_exact is None:
         for k in range(Nt):
             print(k)
-            data = griddata((X_grid.flatten(), Y_grid.flatten()), cartesian_data[..., 0, k].flatten('F'), (xi, yi),
-                            method='cubic',
-                            fill_value=0)
-            data = np.reshape(data, newshape=[Nx, Ny])
-            polar_data[..., 0, k] = data
+            data, ptSettings = polarTransform.convertToPolarImage(cartesian_data[..., 0, k],
+                                                                  initialRadius=np.min(r_i), finalRadius=np.max(r_i),
+                                                                  initialAngle=np.min(theta_i),
+                                                                  finalAngle=np.max(theta_i),
+                                                                  center=(X_c, Y_c), radiusSize=Nx, angleSize=Ny)
+            polar_data[..., 0, k] = data.transpose()
+            aux.append(ptSettings)
+    else:
+        data, ptSettings = polarTransform.convertToPolarImage(cartesian_data[..., 0, 0],
+                                                              initialRadius=np.min(r_i), finalRadius=np.max(r_i),
+                                                              initialAngle=np.min(theta_i),
+                                                              finalAngle=np.max(theta_i),
+                                                              center=(X_c, Y_c), radiusSize=Nx, angleSize=Ny)
+        polar_data[..., 0, 0] = data.transpose()
+        aux.append(ptSettings)
 
-    return polar_data, theta_i, r_i
+    return polar_data, theta_i, r_i, aux
 
 
-def polar_to_cartesian(polar_data, X, Y, theta_i, r_i, X_c, Y_c, t, method=2):
-    Nx = len(X)
-    Ny = len(Y)
+def polar_to_cartesian(polar_data, t, aux=None, t_exact=None):
     Nt = len(t)
     cartesian_data = np.zeros_like(polar_data)
 
-    # Method 1 seems to run into problems of coordinate ordering (while correcting look at the
-    # 'F' and 'C' ordering problem)
-    if method == 1:
-        from scipy.ndimage.interpolation import map_coordinates
-        # "X" and "Y" are the numpy arrays with desired cartesian coordinates, thus creating a grid
-        X_grid, Y_grid = np.meshgrid(X, Y)
-
-        # We have the "X" and "Y" coordinates of each point in the output plane thus we calculate their corresponding theta and r
-        X_new = X_grid - X_c  # Shift the origin to the center of the image
-        Y_new = Y_grid - Y_c
-        r = np.sqrt(X_new ** 2 + Y_new ** 2).flatten()  # polar coordinate r
-        theta = np.arctan2(Y_new, X_new).flatten()  # polar coordinate theta
-
-        # Negative angles are corrected
-        theta[theta < 0] = 2*np.pi + theta[theta < 0]
-
-        # using the known theta and r steps the coordinates are mapped to those of the data grid
-        dtheta = theta_i[1] - theta_i[0]
-        dr = r_i[1] - r_i[0]
-        theta = theta / dtheta
-        r = r / dr
-
-        # An array of polar coordinates is created
-        coords = np.vstack((theta, r))
-
-        # The data is mapped to the new coordinates
-        for k in range(Nt):
-            data = polar_data[:, :, 0, k]
-            data = np.vstack((data, data[-1, :]))  # To avoid holes in the 360º - 0º boundary
-            data = map_coordinates(data, coords, order=5, mode='constant')
-            data = np.reshape(data, newshape=[Nx, Ny], order="F")
-            cartesian_data[:, :, 0, k] = data
-    elif method == 2:
-        from scipy.interpolate import griddata
-        X_grid, Y_grid = np.meshgrid(X, Y)
-        X_grid, Y_grid = np.transpose(X_grid), np.transpose(Y_grid)
-        # Read the polar mesh
-        theta_grid, r_grid = np.meshgrid(theta_i, r_i)
-
-        # Cartesian equivalent of polar coordinates
-        xi, yi = r_grid * np.cos(theta_grid), r_grid * np.sin(theta_grid)
-        xi = xi + X_c  # Shift the origin back to the lower left corner
-        yi = yi + Y_c
-
-        # Interpolate from polar to cartesian grid
+    if t_exact is None:
         for k in range(Nt):
             print(k)
-            data = polar_data[:, :, 0, k]
-            data = griddata((xi.flatten(), yi.flatten()), data.flatten(), (X_grid, Y_grid),
-                            method='cubic',
-                            fill_value=0)
-            data = np.reshape(data, newshape=[Nx, Ny])
-            cartesian_data[:, :, 0, k] = data
+            cartesian_data[..., 0, k] = aux[k].convertToCartesianImage(polar_data[..., 0, k].transpose())
+    else:
+        cartesian_data[..., 0, 0] = aux[t_exact].convertToCartesianImage(polar_data[..., 0, 0].transpose())
 
     return cartesian_data
