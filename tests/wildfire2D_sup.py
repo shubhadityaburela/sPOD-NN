@@ -251,6 +251,7 @@ class wildfire2D_sup:
         Q = np.reshape(self.q_test, newshape=[self.Nx, self.Ny, 1, self.Nt], order="F")
         q_test_polar = np.reshape(q_test_polar, newshape=[self.Nx, self.Ny, 1, self.Nt])
         if test_type['typeOfTest'] == "query":
+            plot_online = False
             test_sample = test_type['test_sample']
 
             tmp_Tr = []

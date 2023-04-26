@@ -191,6 +191,7 @@ class wildfire1D_sup:
                          plot_online=False, test_type=None):
 
         if test_type['typeOfTest'] == "query":
+            plot_online = False
             test_sample = test_type['test_sample']
             self.q_test = self.q_test[:, test_sample][..., np.newaxis]
             self.shifts_train = np.asarray([self.shifts_train[:, i * self.Nt + test_sample]
@@ -238,7 +239,6 @@ class wildfire1D_sup:
                                                                    TA_list_interp, self.mu_vecs_train,
                                                                    Nx, 1, Nt, self.mu_vecs_test,
                                                                    trafos_interpolated)
-        QTILDE_FRAME_WISE = np.squeeze(QTILDE_FRAME_WISE)
         toc_I = time.process_time()
 
         # Shifts error
@@ -291,19 +291,16 @@ class wildfire1D_sup:
         q1_pred = U_list[0] @ time_amplitudes_1_pred
         q2_pred = U_list[1] @ time_amplitudes_2_pred
         q3_pred = U_list[2] @ time_amplitudes_3_pred
-        use_interp_shift = False
+
         Q_recon_sPOD = np.zeros_like(q1_pred)
         NumFrames = 3
-        Q_pred = [q1_pred, q2_pred, q3_pred]
-        if use_interp_shift:
-            shifts_1 = DELTA_PRED_FRAME_WISE[0]
-            shifts_2 = np.zeros_like(DELTA_PRED_FRAME_WISE[0])
-            shifts_3 = DELTA_PRED_FRAME_WISE[2]
-        else:
-            shifts_1 = shifts_1_pred
-            shifts_2 = np.zeros_like(shifts_1_pred)
-            shifts_3 = shifts_3_pred
+        Q_pred = [np.reshape(q1_pred, newshape=data_shape),
+                  np.reshape(q2_pred, newshape=data_shape),
+                  np.reshape(q3_pred, newshape=data_shape)]
 
+        shifts_1 = shifts_1_pred
+        shifts_2 = np.zeros_like(shifts_1_pred)
+        shifts_3 = shifts_3_pred
         L = [self.x[-1]]
         tic_trafo_2 = time.process_time()
         trafos_1 = transforms(data_shape, L, shifts=shifts_1, dx=[dx],
@@ -325,14 +322,19 @@ class wildfire1D_sup:
         Q_recon_POD = U_POD_TRAIN @ frame_amplitude_predicted_POD
         toc_POD = time.process_time()
 
+        self.q_test = np.squeeze(self.q_test)
+        Q_recon_sPOD = np.squeeze(Q_recon_sPOD)
+        Q_recon_POD = np.squeeze(Q_recon_POD)
+        QTILDE_FRAME_WISE = np.squeeze(QTILDE_FRAME_WISE)
+
         num1 = np.linalg.norm(self.q_test - Q_recon_sPOD)
         den1 = np.linalg.norm(self.q_test)
 
         num2 = np.linalg.norm(self.q_test - Q_recon_POD)
         den2 = np.linalg.norm(self.q_test)
 
-        num1_i = np.linalg.norm(np.squeeze(self.q_test) - QTILDE_FRAME_WISE)
-        den1_i = np.linalg.norm(np.squeeze(self.q_test))
+        num1_i = np.linalg.norm(self.q_test - QTILDE_FRAME_WISE)
+        den1_i = np.linalg.norm(self.q_test)
 
         print('Check 3...')
         print("Relative reconstruction error indicator for full snapshot (sPOD-NN): {}".format(num1 / den1))

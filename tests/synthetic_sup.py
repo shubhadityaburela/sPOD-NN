@@ -6,7 +6,7 @@ os.makedirs(impath, exist_ok=True)
 
 
 class synthetic_sup:
-    def __init__(self, spod_iter, plot_offline_data=False):
+    def __init__(self, training_samples=[], testing_sample=[], nmodes=8, spod_iter=300, plot_offline_data=False):
         self.Nx = 500  # number of grid points in x
         self.Ny = 1  # number of grid points in y
         self.Nt = 500  # numer of time intervals
@@ -15,7 +15,7 @@ class synthetic_sup:
 
         self.T = 1  # total time
         self.L = 1  # total domain size
-        self.nmodes = 8  # reduction of singular values
+        self.nmodes = nmodes  # reduction of singular values
         self.D = self.nmodes
 
         self.x = np.arange(-self.Nx // 2, self.Nx // 2) / self.Nx * self.L
@@ -33,13 +33,13 @@ class synthetic_sup:
         print("Synthetic data checks....")
         ##########################################
         # Create training data
-        self.mu_vecs_train = np.asarray([0.1, 0.15, 0.2, 0.25, 0.3])
+        self.mu_vecs_train = np.asarray(training_samples)
         self.Nsamples_train = np.size(self.mu_vecs_train)
         self.q_train, q1_train, q2_train, self.shifts_train, self.params_train, self.trafos_train = \
             self.create_data(self.mu_vecs_train)
         ##########################################
         # Create testing data
-        self.mu_vecs_test = np.asarray([0.23])
+        self.mu_vecs_test = np.asarray(testing_sample)
         self.Nsamples_test = np.size(self.mu_vecs_test)
         self.q_test, self.q1_test, self.q2_test, self.shifts_test, self.params_test, self.trafos_test = \
             self.create_data(self.mu_vecs_test)
@@ -165,11 +165,24 @@ class synthetic_sup:
 
         return q, q1, q2, shifts, p, trafos
 
-    def OnlinePredictionAnalysis(self, TA_sPOD_pred, shifts_sPOD_pred, TA_POD_pred, plot_online_data=False):
+    def OnlinePredictionAnalysis(self, TA_sPOD_pred, shifts_sPOD_pred, TA_POD_pred,
+                                 plot_online=False, test_type=None):
+
+        if test_type['typeOfTest'] == "query":
+            plot_online = False
+            test_sample = test_type['test_sample']
+            self.q_test = self.q_test[:, test_sample][..., np.newaxis]
+            for frame in range(self.NumFrames):
+                self.shifts_train[frame] = np.asarray([self.shifts_train[frame][:, i * self.Nt + test_sample]
+                                                      for i in range(self.Nsamples_train)]).transpose()
+
+
         print("#############################################")
         print('Online Error checks')
-        ###########################################
-        # Online error with respect to testing wildfire_data
+        Nx = len(self.x)
+        Nt = TA_sPOD_pred.shape[1]  # len(self.t)
+        data_shape = [Nx, 1, 1, Nt]
+        dx = self.x[1] - self.x[0]
         TA_sPOD_pred_1 = TA_sPOD_pred[:self.D, :]
         TA_sPOD_pred_2 = TA_sPOD_pred[self.D:2 * self.D, :]
         shifts_sPOD_pred_1 = shifts_sPOD_pred[0, :]
@@ -177,17 +190,25 @@ class synthetic_sup:
 
         ###########################################
         # Implement the interpolation to find the online prediction
-        shifts_interp_list = []
+        shifts_list_interpolated = []
+        cnt = 0
         for frame in range(self.NumFrames):
-            shifts = np.reshape(self.shifts_train[frame], [self.Nsamples_train, self.Nt]).T
-            shifts_interp_list.append(shifts)
+            shifts = np.reshape(self.shifts_train[cnt], [self.Nsamples_train, Nt]).T
+            shifts_list_interpolated.append(shifts)
+            cnt = cnt + 1
+
+        DELTA_PRED_FRAME_WISE = my_delta_interpolate(shifts_list_interpolated, self.mu_vecs_train, self.mu_vecs_test)
         Nmodes = [self.D, self.D]
+        trafos_interp = [
+            transforms(data_shape, [self.L], shifts=DELTA_PRED_FRAME_WISE[0], dx=[self.dx], use_scipy_transform=False,
+                       interp_order=5),
+            transforms(data_shape, [self.L], shifts=DELTA_PRED_FRAME_WISE[1], dx=[self.dx], use_scipy_transform=False,
+                       interp_order=5)
+        ]
         q_interp, TA_interp = my_interpolated_state(Nmodes, self.U_list, self.TA_interp_list,
                                                     self.mu_vecs_train,
-                                                    self.Nx, self.Ny, self.Nt,
-                                                    self.mu_vecs_test, self.trafos_test)
-        q_interp = np.squeeze(q_interp)
-        shifts_interp = my_delta_interpolate(shifts_interp_list, self.mu_vecs_train, self.mu_vecs_test)
+                                                    self.Nx, self.Ny, Nt,
+                                                    self.mu_vecs_test, trafos_interp)
         ###########################################
 
         # Shifts error
@@ -195,9 +216,9 @@ class synthetic_sup:
         den1 = np.linalg.norm(self.SHIFTS_TEST[0])
         num2 = np.linalg.norm(self.SHIFTS_TEST[1] - shifts_sPOD_pred_2.flatten())
         den2 = np.linalg.norm(self.SHIFTS_TEST[1])
-        num3 = np.linalg.norm(self.SHIFTS_TEST[0] - shifts_interp[0])
+        num3 = np.linalg.norm(self.SHIFTS_TEST[0] - DELTA_PRED_FRAME_WISE[0])
         den3 = np.linalg.norm(self.SHIFTS_TEST[0])
-        num4 = np.linalg.norm(self.SHIFTS_TEST[1] - shifts_interp[1])
+        num4 = np.linalg.norm(self.SHIFTS_TEST[1] - DELTA_PRED_FRAME_WISE[1])
         den4 = np.linalg.norm(self.SHIFTS_TEST[1])
         print('Check 1...')
         print("Relative error indicator (sPOD-NN) for shift: 1 is {}".format(num1 / den1))
@@ -212,10 +233,10 @@ class synthetic_sup:
         den1 = np.linalg.norm(TA_test_1)
         num2 = np.linalg.norm(TA_test_2 - TA_sPOD_pred_2)
         den2 = np.linalg.norm(TA_test_2)
-        num3 = np.linalg.norm(TA_test_1 - TA_interp[0])
-        den3 = np.linalg.norm(TA_test_1)
-        num4 = np.linalg.norm(TA_test_2 - TA_interp[1])
-        den4 = np.linalg.norm(TA_test_2)
+        num3 = np.linalg.norm(np.squeeze(TA_test_1) - TA_interp[0])
+        den3 = np.linalg.norm(np.squeeze(TA_test_1))
+        num4 = np.linalg.norm(np.squeeze(TA_test_2) - TA_interp[1])
+        den4 = np.linalg.norm(np.squeeze(TA_test_2))
         num5 = np.linalg.norm(self.TA_POD_TEST - TA_POD_pred)
         den5 = np.linalg.norm(self.TA_POD_TEST)
         print('Check 2...')
@@ -228,28 +249,28 @@ class synthetic_sup:
         q_sPOD_pred_1 = self.U_list[0][:, :self.D] @ TA_sPOD_pred_1
         q_sPOD_pred_2 = self.U_list[1][:, :self.D] @ TA_sPOD_pred_2
         # Total reconstructed error
-        use_original_shift = False
         q_sPOD_recon = 0
         NumFrames = 2
-        q_pred = [q_sPOD_pred_1, q_sPOD_pred_2]
-        if use_original_shift:
-            for frame in range(NumFrames):
-                q_sPOD_recon += self.trafos_test[frame].apply(q_pred[frame])
-        else:
-            trafos = [
-                transforms([self.Nx, 1, 1, self.Nt], [self.L], shifts=np.squeeze(shifts_sPOD_pred_1), dx=[self.dx],
-                           use_scipy_transform=False,
-                           interp_order=5),
-                transforms([self.Nx, 1, 1, self.Nt], [self.L], shifts=np.squeeze(shifts_sPOD_pred_2), dx=[self.dx],
-                           use_scipy_transform=False,
-                           interp_order=5)]
-            for frame in range(NumFrames):
-                q_sPOD_recon += trafos[frame].apply(q_pred[frame])
+        q_pred = [np.reshape(q_sPOD_pred_1, newshape=data_shape), np.reshape(q_sPOD_pred_2, newshape=data_shape)]
+        trafos = [
+            transforms(data_shape, [self.L], shifts=shifts_sPOD_pred_1, dx=[self.dx],
+                       use_scipy_transform=False,
+                       interp_order=5),
+            transforms(data_shape, [self.L], shifts=shifts_sPOD_pred_2, dx=[self.dx],
+                       use_scipy_transform=False,
+                       interp_order=5)]
+        for frame in range(NumFrames):
+            q_sPOD_recon += trafos[frame].apply(q_pred[frame])
+        q_POD_recon = self.U_POD_TRAIN @ TA_POD_pred
+
+        self.q_test = np.squeeze(self.q_test)
+        q_sPOD_recon = np.squeeze(q_sPOD_recon)
+        q_POD_recon = np.squeeze(q_POD_recon)
+        q_interp = np.squeeze(q_interp)
 
         num1 = np.linalg.norm(self.q_test - q_sPOD_recon)
         den1 = np.linalg.norm(self.q_test)
 
-        q_POD_recon = self.U_POD_TRAIN @ TA_POD_pred
         num2 = np.linalg.norm(self.q_test - q_POD_recon)
         den2 = np.linalg.norm(self.q_test)
 
@@ -273,11 +294,11 @@ class synthetic_sup:
 
         errors = [rel_err_sPOD, rel_err_POD, rel_err_interp]
 
-        if plot_online_data:
+        if plot_online:
             # Plot the online prediction data
             self.plot_timeamplitudes_shifts_Pred(TA_sPOD_pred_1, TA_test_1, TA_sPOD_pred_2,
                                                  TA_test_2, TA_POD_pred, TA_interp, shifts_sPOD_pred_1,
-                                                 shifts_sPOD_pred_2, shifts_interp)
+                                                 shifts_sPOD_pred_2, DELTA_PRED_FRAME_WISE)
             self.plot_recons_snapshot(q_sPOD_recon, q_POD_recon, q_interp)
 
         return errors

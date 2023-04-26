@@ -265,7 +265,6 @@ class wildfire2DNonLinear_sup:
         Nt = frame_amplitude_predicted_sPOD.shape[1]
         Q = np.reshape(self.q_test, newshape=[self.Nx, self.Ny, 1, self.Nt], order="F")
         q_test_polar = np.reshape(q_test_polar, newshape=[self.Nx, self.Ny, 1, self.Nt])
-
         print("#############################################")
         print('Online Error checks')
         # %% Online error with respect to testing wildfire_data
