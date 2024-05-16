@@ -2,10 +2,10 @@ import time
 from Helper import *
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
-impath = "../plots/images_wildfire2D/"
+impath = "../plots/images_wildfire2D_review/"
 os.makedirs(impath, exist_ok=True)
 
-data_path = os.path.abspath(".") + '/wildfire_data/2D/'
+data_path = os.path.abspath(".") + '/wildfire_data/2D_review/dataType_1/'
 
 cmap = 'YlOrRd'
 
@@ -102,9 +102,10 @@ class wildfire2D_sup:
         # Apply srPCA on the data
         transform_list = [trafo_train_1, trafo_train_2]
         qmat = np.concatenate([np.reshape(q, newshape=[-1, self.Nt]) for q in q_polar], axis=1)
-        mu = np.prod(np.size(qmat, 0)) / (4 * np.sum(np.abs(qmat))) * 0.05
+        mu = np.prod(np.size(qmat, 0)) / (4 * np.sum(np.abs(qmat))) * 0.7  # 0.7 for T and 0.9 for S
         lambd = 1 / np.sqrt(np.max([self.Nx, self.Ny]))
-        ret = shifted_rPCA(qmat, transform_list, nmodes_max=100, eps=1e-4, Niter=spod_iter, use_rSVD=True, mu=mu,
+
+        ret = shifted_rPCA(qmat, transform_list, nmodes_max=12, eps=1e-4, Niter=spod_iter, use_rSVD=True, mu=mu,
                            lambd=lambd)
         sPOD_frames_train, qtilde_train, rel_err_train = ret.frames, ret.data_approx, ret.rel_err_hist
         self.q_polar_train = qmat
@@ -164,9 +165,9 @@ class wildfire2D_sup:
         # Apply sPOD on the data
         transform_list = [trafo_test_1, trafo_test_2]
         qmat = np.reshape(q_polar, [-1, self.Nt])
-        mu = np.prod(np.size(qmat, 0)) / (4 * np.sum(np.abs(qmat))) * 0.05
+        mu = np.prod(np.size(qmat, 0)) / (4 * np.sum(np.abs(qmat))) * 0.7  # 0.7 for T and 0.9 for S
         lambd = 1 / np.sqrt(np.max([self.Nx, self.Ny]))
-        ret = shifted_rPCA(qmat, transform_list, nmodes_max=100, eps=1e-4, Niter=spod_iter, use_rSVD=True, mu=mu,
+        ret = shifted_rPCA(qmat, transform_list, nmodes_max=12, eps=1e-4, Niter=spod_iter, use_rSVD=True, mu=mu,
                            lambd=lambd)
         sPOD_frames_test, qtilde_test, rel_err_test = ret.frames, ret.data_approx, ret.rel_err_hist
         self.q_polar_test = qmat
@@ -425,21 +426,28 @@ class wildfire2D_sup:
             err_full_interp))
         print("Relative reconstruction error indicator for full snapshot (cartesian) (POD-NN): {}".format(err_full_POD))
 
-        num1 = [np.abs(Q[:, :, 0, n].flatten() - Q_recon_sPOD_cart[:, :, 0, n].flatten()) for n in
-                range(Nt)]
-        den1 = np.sqrt(
-            sum([np.square(np.linalg.norm((Q[:, :, 0, n].flatten()))) for n in range(Nt)]) / Nt)
-        num2 = [np.abs(Q[:, :, 0, n].flatten() - Q_recon_POD_cart[:, :, 0, n].flatten()) for n in
-                range(Nt)]
-        den2 = np.sqrt(
-            sum([np.square(np.linalg.norm((Q[:, :, 0, n].flatten()))) for n in range(Nt)]) / Nt)
-        num3 = [np.abs(Q[:, :, 0, n].flatten() - Q_recon_interp_cart[:, :, 0, n].flatten()) for n in
-                range(Nt)]
-        den3 = np.sqrt(
-            sum([np.square(np.linalg.norm((Q[:, :, 0, n].flatten()))) for n in range(Nt)]) / Nt)
-        rel_err_sPOD_cart = [x / den1 for x in num1]
-        rel_err_POD_cart = [x / den2 for x in num2]
-        rel_err_interp_cart = [x / den3 for x in num3]
+
+        if test_type['typeOfTest'] != "query":
+            Q_diff_sPOD = np.concatenate([Q[:, :, 0, n].flatten('F') - Q_recon_sPOD_cart[:, :, 0, n].flatten('F')
+                                     for n in range(Nt)]).reshape(self.Nx * self.Ny, Nt, order='F')
+            Q_diff_POD = np.concatenate([Q[:, :, 0, n].flatten('F') - Q_recon_POD_cart[:, :, 0, n].flatten('F')
+                                          for n in range(Nt)]).reshape(self.Nx * self.Ny, Nt, order='F')
+            Q_diff_interp = np.concatenate([Q[:, :, 0, n].flatten('F') - Q_recon_interp_cart[:, :, 0, n].flatten('F')
+                                          for n in range(Nt)]).reshape(self.Nx * self.Ny, Nt, order='F')
+            Q_act = np.concatenate([Q[:, :, 0, n].flatten('F')
+                                    for n in range(Nt)]).reshape(self.Nx * self.Ny, Nt, order='F')
+            num1 = np.sqrt(np.einsum('ij,ij->j', Q_diff_sPOD, Q_diff_sPOD))
+            den1 = np.sqrt(np.sum(np.einsum('ij,ij->j', Q_act, Q_act)) / self.Nt)
+            num2 = np.sqrt(np.einsum('ij,ij->j', Q_diff_POD, Q_diff_POD))
+            num3 = np.sqrt(np.einsum('ij,ij->j', Q_diff_interp, Q_diff_interp))
+
+            rel_err_sPOD_cart = num1 / den1
+            rel_err_POD_cart = num2 / den1
+            rel_err_interp_cart = num3 / den1
+
+            errors = [rel_err_sPOD_cart, rel_err_POD_cart, rel_err_interp_cart]
+        else:
+            errors = [np.zeros(self.Nt), np.zeros(self.Nt), np.zeros(self.Nt)]
 
         if plot_online:
             # Plot the online prediction data
@@ -447,7 +455,7 @@ class wildfire2D_sup:
                            time_amplitudes_2_test, TA_INTERPOLATED, shifts_1_pred, SHIFTS_TEST, DELTA_PRED_FRAME_WISE,
                            frame_amplitude_predicted_POD, TA_POD_TEST, self.x, self.t)
 
-        errors = [rel_err_sPOD_cart, rel_err_POD_cart, rel_err_interp_cart]
+
 
         print('Timing...')
         print(
@@ -482,7 +490,7 @@ class wildfire2D_sup:
 
         ax1.pcolormesh(self.X, self.Y, np.squeeze(q[:, :, 0, t_a - 1]), vmin=min_a, vmax=max_a, cmap=cmap)
         ax1.axis('scaled')
-        ax1.set_title(r"$t=100s$")
+        # ax1.set_title(r"$t=t^*_1$")
         ax1.set_yticks([], [])
         ax1.set_xticks([], [])
         ax1.axhline(y=self.y[self.Ny // 2 - 1], linestyle='--', color='g')
@@ -492,7 +500,7 @@ class wildfire2D_sup:
 
         ax2.pcolormesh(self.X, self.Y, np.squeeze(q[:, :, 0, t_b - 1]), vmin=min_b, vmax=max_b, cmap=cmap)
         ax2.axis('scaled')
-        ax2.set_title(r"$t=1000s$")
+        # ax2.set_title(r"$t=t^*_2$")
         ax2.set_yticks([], [])
         ax2.set_xticks([], [])
         ax2.axhline(y=self.y[self.Ny // 2 - 1], linestyle='--', color='g')
@@ -534,6 +542,43 @@ class wildfire2D_sup:
 
         fig.savefig(impath + str(var_name) + "-mixed", dpi=300, transparent=True)
         plt.close(fig)
+
+    def plot_recon_video(self, Q_recon_sPOD_cart, Q_recon_POD_cart, Q_recon_interp_cart, plot_every=10, var_name="T"):
+        immpath = impath + "final_srPCA_2D/"
+        os.makedirs(immpath, exist_ok=True)
+
+        q = np.reshape(self.q_test, newshape=[self.Nx, self.Ny, 1, self.Nt], order="F")
+
+        for n in range(self.Nt):
+            if n % plot_every == 0:
+                min = np.min(q[..., 0, n])
+                max = np.max(q[..., 0, n])
+
+                fig, ax = plt.subplots(1, 2, figsize=(12.5, 5.5))
+
+                ax[0].pcolormesh(self.X, self.Y, np.squeeze(q[:, :, 0, n]), vmin=min, vmax=max, cmap=cmap)
+                ax[0].axis('scaled')
+                ax[0].set_yticks([], [])
+                ax[0].set_xticks([], [])
+                ax[0].axhline(y=self.y[self.Ny // 2 - 1], linestyle='--', color='g')
+                ax[0].set_ylabel(r"space $y$")
+                ax[0].set_xlabel(r"space $x$")
+
+                ax[1].plot(self.x, np.squeeze(q[:, self.Ny // 2, 0, n]), color="green", linestyle="-", label='actual')
+                ax[1].plot(self.x, np.squeeze(Q_recon_sPOD_cart[:, self.Ny // 2, 0, n]), color="red", linestyle="--",
+                           label='sPOD-NN')
+                ax[1].plot(self.x, np.squeeze(Q_recon_interp_cart[:, self.Ny // 2, 0, n]), color="blue", linestyle="-.",
+                           label='sPOD-I')
+                ax[1].plot(self.x, np.squeeze(Q_recon_POD_cart[:, self.Ny // 2, 0, n]), color="black", linestyle="-.",
+                           label='POD-NN')
+                ax[1].set_ylim(bottom=min - 100, top=max + 300)
+                ax[1].legend()
+                ax[1].grid()
+                ax[1].set_ylabel(r"$T$")
+                ax[1].set_xlabel(r"space $x$")
+
+                fig.savefig(immpath + str(var_name) + "-mixed" + "-" + str(n), dpi=300, transparent=True)
+                plt.close(fig)
 
 
 def plot_pred_comb(time_amplitudes_1_pred, time_amplitudes_1_test, time_amplitudes_2_pred,

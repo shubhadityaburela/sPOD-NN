@@ -2,7 +2,7 @@ import time
 from Helper import *
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
-impath = "../plots/images_wildfire1D/"
+impath = "../plots/images_wildfire1D_review/"
 os.makedirs(impath, exist_ok=True)
 
 data_path = os.path.abspath(".") + '/wildfire_data/1D/'
@@ -53,6 +53,7 @@ class wildfire1D_sup:
                              self.mu_vecs_train]
         self.params_train = np.concatenate(self.params_train, axis=1)
 
+
     def run_sPOD(self, spod_iter):
         print("#############################################")
         print("sPOD run started....")
@@ -77,10 +78,9 @@ class wildfire1D_sup:
 
         qmat = np.reshape(self.q_train, [-1, self.Nt * self.Nsamples_train])
         [N, M] = np.shape(qmat)
-        mu0 = N * M / (4 * np.sum(np.abs(qmat))) * 0.001
-        lambd0 = 1 / np.sqrt(np.maximum(M, N)) * 10
-
-        ret_train = shifted_rPCA(self.q_train, trafos_train, nmodes_max=60, eps=1e-16, Niter=spod_iter, use_rSVD=True,
+        mu0 = N * M / (4 * np.sum(np.abs(qmat))) * 0.005  # 0.001 FOR T and 0.005 for S
+        lambd0 = 1 / np.sqrt(np.maximum(M, N)) * 5  # 5 for T and S # (Reducing the multiplication factor here reduces the number of modes in the output of sPOD)
+        ret_train = shifted_rPCA(self.q_train, trafos_train, nmodes_max=10, eps=1e-16, Niter=spod_iter, use_rSVD=True,
                                  mu=mu0, lambd=lambd0, dtol=1e-5)
         sPOD_frames_train, qtilde_train, rel_err_train = ret_train.frames, ret_train.data_approx, ret_train.rel_err_hist
 
@@ -145,10 +145,10 @@ class wildfire1D_sup:
 
         qmat = np.reshape(self.q_test, [-1, self.Nt])
         [N, M] = np.shape(qmat)
-        mu0 = N * M / (4 * np.sum(np.abs(qmat))) * 0.001
-        lambd0 = 1 / np.sqrt(np.maximum(M, N)) * 10
+        mu0 = N * M / (4 * np.sum(np.abs(qmat))) * 0.001  # 0.001 FOR T  0.005 for S
+        lambd0 = 1 / np.sqrt(np.maximum(M, N)) * 5  #   5 for T and S
 
-        ret_test = shifted_rPCA(self.q_test, trafos_test, nmodes_max=60, eps=1e-16, Niter=spod_iter, use_rSVD=True,
+        ret_test = shifted_rPCA(self.q_test, trafos_test, nmodes_max=5, eps=1e-16, Niter=spod_iter, use_rSVD=True,
                                 mu=mu0, lambd=lambd0, dtol=1e-5)
         sPOD_frames_test, qtilde_test, rel_err_test = ret_test.frames, ret_test.data_approx, ret_test.rel_err_hist
 
@@ -341,17 +341,25 @@ class wildfire1D_sup:
         print("Relative reconstruction error indicator for full snapshot (sPOD-I): {}".format(num1_i / den1_i))
         print("Relative reconstruction error indicator for full snapshot (POD-NN): {}".format(num2 / den2))
 
-        num1 = np.abs(self.q_test - Q_recon_sPOD)
-        den1 = np.sqrt(np.sum(np.square(np.linalg.norm(self.q_test, axis=0))) / self.Nt)
-        num2 = np.abs(self.q_test - Q_recon_POD)
-        den2 = np.sqrt(np.sum(np.square(np.linalg.norm(self.q_test, axis=0))) / self.Nt)
-        num3 = np.abs(self.q_test - QTILDE_FRAME_WISE)
-        den3 = np.sqrt(np.sum(np.square(np.linalg.norm(self.q_test, axis=0))) / self.Nt)
-        rel_err_sPOD = num1 / den1
-        rel_err_POD = num2 / den2
-        rel_err_interp = num3 / den3
 
-        errors = [rel_err_sPOD, rel_err_POD, rel_err_interp]
+        if test_type['typeOfTest'] != "query":
+            one = self.q_test - Q_recon_sPOD
+            num1 = np.sqrt(np.einsum('ij,ij->j', one, one))
+            den1 = np.sqrt(np.sum(np.einsum('ij,ij->j', self.q_test, self.q_test)) / self.Nt)
+
+            two = self.q_test - Q_recon_POD
+            num2 = np.sqrt(np.einsum('ij,ij->j', two, two))
+
+            three = self.q_test - QTILDE_FRAME_WISE
+            num3 = np.sqrt(np.einsum('ij,ij->j', three, three))
+
+            rel_err_sPOD = num1 / den1
+            rel_err_POD = num2 / den1
+            rel_err_interp = num3 / den1
+
+            errors = [rel_err_sPOD, rel_err_POD, rel_err_interp]
+        else:
+            errors = [np.zeros(self.Nt), np.zeros(self.Nt), np.zeros(self.Nt)]
 
         if plot_online:
             if test_type['typeOfTest'] != "query":
@@ -370,6 +378,7 @@ class wildfire1D_sup:
         print(f"Time consumption in assembling the final solution (sPOD-NN) : {((toc_sPOD - tic_sPOD) - (toc_trafo_2 - tic_trafo_2)):0.4f} seconds")
         print(f"Time consumption in assembling the final solution (sPOD-I)  : {((toc_I - tic_I) - (toc_trafo_1 - tic_trafo_1)):0.4f} seconds")
         print(f"Time consumption in assembling the final solution (POD-NN)  : {toc_POD - tic_POD:0.4f} seconds")
+
 
         return errors
 
@@ -391,28 +400,28 @@ def plot_sPODframes(q_test, q1_spod_frame, q2_spod_frame, q3_spod_frame, qtilde,
     # Reconstruction
     im = axs[0].pcolormesh(Xgrid, Tgrid, qtilde, vmin=qmin, vmax=qmax, cmap=cmap)
     # axs[0].axis('off')
-    axs[0].axis('scaled')
+    axs[0].axis('auto')
     axs[0].set_xlabel(r"$Q$")
     axs[0].set_yticks([], [])
     axs[0].set_xticks([], [])
     # 1. frame
     axs[1].pcolormesh(Xgrid, Tgrid, q1_spod_frame, vmin=qmin, vmax=qmax, cmap=cmap)
     # axs[1].axis('off')
-    axs[1].axis('scaled')
+    axs[1].axis('auto')
     axs[1].set_xlabel(r"$T^{\Delta^1}Q^1$")
     axs[1].set_yticks([], [])
     axs[1].set_xticks([], [])
     # 2. frame
     axs[2].pcolormesh(Xgrid, Tgrid, q2_spod_frame, vmin=qmin, vmax=qmax, cmap=cmap)
     # axs[2].axis('off')
-    axs[2].axis('scaled')
+    axs[2].axis('auto')
     axs[2].set_xlabel(r"$T^{\Delta^2}Q^2$")
     axs[2].set_yticks([], [])
     axs[2].set_xticks([], [])
     # 3. frame
     axs[3].pcolormesh(Xgrid, Tgrid, q3_spod_frame, vmin=qmin, vmax=qmax, cmap=cmap)
     # axs[3].axis('off')
-    axs[3].axis('scaled')
+    axs[3].axis('auto')
     axs[3].set_xlabel(r"$T^{\Delta^3}Q^3$")
     axs[3].set_yticks([], [])
     axs[3].set_xticks([], [])
@@ -521,8 +530,8 @@ def plot_recons_snapshot_cross_section(q_test, Q_recon_interp, Q_recon_sPOD, Q_r
     ax1 = subfig_t.add_subplot(gs_t[0:4, 0])
     # Original
     ax1.pcolormesh(Xgrid, Tgrid, q_test, vmin=qmin, vmax=qmax, cmap=cmap)
-    ax1.axhline(y=t[Nt // 40], linestyle='--', color='r', label=r"$t=35s$")
-    ax1.axhline(y=t[85 * Nt // 100], linestyle='--', color='g', label=r"$t=1190s$")
+    ax1.axhline(y=t[Nt // 60], linestyle='--', color='r', label=r"$t=23 s$")
+    ax1.axhline(y=t[85 * Nt // 100], linestyle='--', color='g', label=r"$t=1190 s$")
     ax1.set_title(r"$Q$")
     ax1.set_yticks([], [])
     ax1.set_xticks([], [])
@@ -536,39 +545,39 @@ def plot_recons_snapshot_cross_section(q_test, Q_recon_interp, Q_recon_sPOD, Q_r
     ax4 = subfig_b.add_subplot(gs_b[0:2, 0])
     ax5 = subfig_b.add_subplot(gs_b[2:4, 0], sharex=ax4)
 
-    start = 450
-    end = 2550
+    start = 600
+    end = 2400
     x_trim = x[start:end]
     ax4.plot(x_trim, q_test[start:end, 85 * Nt // 100], color="green", linestyle='-', label='actual')
     ax4.plot(x_trim, Q_recon_sPOD[start:end, 85 * Nt // 100], color="red", linestyle='--', label='sPOD-NN')
     ax4.plot(x_trim, Q_recon_interp[start:end, 85 * Nt // 100], color="blue", linestyle='--', label='sPOD-I')
     ax4.plot(x_trim, Q_recon_POD[start:end, 85 * Nt // 100], color="black", linestyle='--', label='POD-NN')
     axin2 = ax4.inset_axes([0.35, 0.2, 0.35, 0.35])
-    axin2.plot(x[680:880], q_test[680:880, 85 * Nt // 100], color="green", linestyle='-')
-    axin2.plot(x[680:880], Q_recon_sPOD[680:880, 85 * Nt // 100], color="red", linestyle='--')
-    axin2.plot(x[680:880], Q_recon_interp[680:880, 85 * Nt // 100], color="blue", linestyle='--')
-    axin2.plot(x[680:880], Q_recon_POD[680:880, 85 * Nt // 100], color="black", linestyle='--')
-    axin2.set_xlim(230, 280)
-    axin2.set_ylim(-80, 60)
+    axin2.plot(x[660:900], q_test[660:900, 85 * Nt // 100], color="green", linestyle='-')
+    axin2.plot(x[660:900], Q_recon_sPOD[660:900, 85 * Nt // 100], color="red", linestyle='--')
+    axin2.plot(x[660:900], Q_recon_interp[660:900, 85 * Nt // 100], color="blue", linestyle='--')
+    axin2.plot(x[660:900], Q_recon_POD[660:900, 85 * Nt // 100], color="black", linestyle='--')
+    axin2.set_xlim(220, 300)
+    axin2.set_ylim(-80, 80)
     axin2.set_xticks([], [])
     axin2.set_yticks([], [])
     ax4.indicate_inset_zoom(axin2)
     # axs[1].set_yticks([], [])
     # axs[1].set_xticks([], [])
-    ax4.set_title(r"$t=1190s$")
+    ax4.set_title(r"$t=1190 s$")
 
     ax4.grid()
     ax4.legend(loc='upper center')
 
-    ax5.plot(x_trim, q_test[start:end, Nt // 40], color="green", linestyle='-', label='actual')
-    ax5.plot(x_trim, Q_recon_sPOD[start:end, Nt // 40], color="red", linestyle='--', label='sPOD-NN')
-    ax5.plot(x_trim, Q_recon_interp[start:end, Nt // 40], color="blue", linestyle='--', label='sPOD-I')
-    ax5.plot(x_trim, Q_recon_POD[start:end, Nt // 40], color="black", linestyle='--', label='POD-NN')
+    ax5.plot(x_trim, q_test[start:end, Nt // 60], color="green", linestyle='-', label='actual')
+    ax5.plot(x_trim, Q_recon_sPOD[start:end, Nt // 60], color="red", linestyle='--', label='sPOD-NN')
+    ax5.plot(x_trim, Q_recon_interp[start:end, Nt // 60], color="blue", linestyle='--', label='sPOD-I')
+    ax5.plot(x_trim, Q_recon_POD[start:end, Nt // 60], color="black", linestyle='--', label='POD-NN')
     axin = ax5.inset_axes([0.6, 0.2, 0.35, 0.35])
-    axin.plot(x[1560:1710], q_test[1560:1710, Nt // 40], color="green", linestyle='-')
-    axin.plot(x[1560:1710], Q_recon_sPOD[1560:1710, Nt // 40], color="red", linestyle='--')
-    axin.plot(x[1560:1710], Q_recon_interp[1560:1710, Nt // 40], color="blue", linestyle='--')
-    axin.plot(x[1560:1710], Q_recon_POD[1560:1710, Nt // 40], color="black", linestyle='--')
+    axin.plot(x[1560:1710], q_test[1560:1710, Nt // 60], color="green", linestyle='-')
+    axin.plot(x[1560:1710], Q_recon_sPOD[1560:1710, Nt // 60], color="red", linestyle='--')
+    axin.plot(x[1560:1710], Q_recon_interp[1560:1710, Nt // 60], color="blue", linestyle='--')
+    axin.plot(x[1560:1710], Q_recon_POD[1560:1710, Nt // 60], color="black", linestyle='--')
     axin.set_xlim(520, 570)
     axin.set_ylim(-100, 100)
     axin.set_xticks([], [])
@@ -576,7 +585,7 @@ def plot_recons_snapshot_cross_section(q_test, Q_recon_interp, Q_recon_sPOD, Q_r
     ax5.indicate_inset_zoom(axin)
     # axs[2].set_yticks([], [])
     # axs[2].set_xticks([], [])
-    ax5.set_title(r"$t=35s$")
+    ax5.set_title(r"$t=23 s$")
     ax5.grid()
     ax5.legend(loc='upper left')
 
