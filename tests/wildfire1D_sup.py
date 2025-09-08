@@ -2,14 +2,12 @@ import time
 from Helper import *
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
-impath = "../plots/images_wildfire1D_review/"
+impath = "../plots/images_wildfire1D/"
 os.makedirs(impath, exist_ok=True)
 
 data_path = os.path.abspath(".") + '/wildfire_data/1D/'
 
 cmap = 'YlOrRd'
-
-
 # cmap = 'YlGn'
 
 
@@ -78,8 +76,9 @@ class wildfire1D_sup:
 
         qmat = np.reshape(self.q_train, [-1, self.Nt * self.Nsamples_train])
         [N, M] = np.shape(qmat)
-        mu0 = N * M / (4 * np.sum(np.abs(qmat))) * 0.005  # 0.001 FOR T and 0.005 for S
+        mu0 = N * M / (4 * np.sum(np.abs(qmat))) * 0.001  # 0.001 FOR T and 0.005 for S
         lambd0 = 1 / np.sqrt(np.maximum(M, N)) * 5  # 5 for T and S # (Reducing the multiplication factor here reduces the number of modes in the output of sPOD)
+
         ret_train = shifted_rPCA(self.q_train, trafos_train, nmodes_max=10, eps=1e-16, Niter=spod_iter, use_rSVD=True,
                                  mu=mu0, lambd=lambd0, dtol=1e-5)
         sPOD_frames_train, qtilde_train, rel_err_train = ret_train.frames, ret_train.data_approx, ret_train.rel_err_hist
@@ -342,6 +341,35 @@ class wildfire1D_sup:
         print("Relative reconstruction error indicator for full snapshot (POD-NN): {}".format(num2 / den2))
 
 
+        num1 = np.linalg.norm(self.q_test - Q_recon_sPOD, ord=1)
+        den1 = np.linalg.norm(self.q_test, ord=1)
+
+        num2 = np.linalg.norm(self.q_test - Q_recon_POD, ord=1)
+        den2 = np.linalg.norm(self.q_test, ord=1)
+
+        num1_i = np.linalg.norm(self.q_test - QTILDE_FRAME_WISE, ord=1)
+        den1_i = np.linalg.norm(self.q_test, ord=1)
+
+        print('Check 4...')
+        print("Relative L1 reconstruction error indicator for full snapshot (sPOD-NN) is {}".format(num1 / den1))
+        print("Relative L1 reconstruction error indicator for full snapshot (sPOD-I) is {}".format(num1_i / den1_i))
+        print("Relative L1 reconstruction error indicator for full snapshot (POD-NN) is {}".format(num2 / den2))
+
+        num1 = np.linalg.norm(self.q_test - Q_recon_sPOD, ord=np.inf)
+        den1 = np.linalg.norm(self.q_test, ord=np.inf)
+
+        num2 = np.linalg.norm(self.q_test - Q_recon_POD, ord=np.inf)
+        den2 = np.linalg.norm(self.q_test, ord=np.inf)
+
+        num1_i = np.linalg.norm(self.q_test - QTILDE_FRAME_WISE, ord=np.inf)
+        den1_i = np.linalg.norm(self.q_test, ord=np.inf)
+
+        print('Check 5...')
+        print("Relative L-inf reconstruction error indicator for full snapshot (sPOD-NN) is {}".format(num1 / den1))
+        print("Relative L-inf reconstruction error indicator for full snapshot (sPOD-I) is {}".format(num1_i / den1_i))
+        print("Relative L-inf reconstruction error indicator for full snapshot (POD-NN) is {}".format(num2 / den2))
+
+
         if test_type['typeOfTest'] != "query":
             one = self.q_test - Q_recon_sPOD
             num1 = np.sqrt(np.einsum('ij,ij->j', one, one))
@@ -357,9 +385,30 @@ class wildfire1D_sup:
             rel_err_POD = num2 / den1
             rel_err_interp = num3 / den1
 
+            # compute pointwise (spatial) errors: shape = (n_space, Nt)
+            one = self.q_test - Q_recon_sPOD
+            two = self.q_test - Q_recon_POD
+            three = self.q_test - QTILDE_FRAME_WISE
+
+            # L-infinity norm per snapshot (over spatial index)
+            num1 = np.max(np.abs(one), axis=0)  # shape (Nt,)
+            num2 = np.max(np.abs(two), axis=0)
+            num3 = np.max(np.abs(three), axis=0)
+
+            # true-solution peak per snapshot
+            den = np.max(np.abs(self.q_test), axis=0)  # shape (Nt,)
+
+            # relative L-infinity error per snapshot
+            eps = 1e-16
+            rel_err_sPOD_inf = num1 / (den + eps)
+            rel_err_POD_inf = num2 / (den + eps)
+            rel_err_interp_inf = num3 / (den + eps)
+
             errors = [rel_err_sPOD, rel_err_POD, rel_err_interp]
+            errors_inf = [rel_err_sPOD_inf, rel_err_POD_inf, rel_err_interp_inf]
         else:
             errors = [np.zeros(self.Nt), np.zeros(self.Nt), np.zeros(self.Nt)]
+            errors_inf = [np.zeros(self.Nt), np.zeros(self.Nt), np.zeros(self.Nt)]
 
         if plot_online:
             if test_type['typeOfTest'] != "query":
@@ -380,7 +429,7 @@ class wildfire1D_sup:
         print(f"Time consumption in assembling the final solution (POD-NN)  : {toc_POD - tic_POD:0.4f} seconds")
 
 
-        return errors
+        return errors, errors_inf
 
 
 def plot_sPODframes(q_test, q1_spod_frame, q2_spod_frame, q3_spod_frame, qtilde, x, t):
@@ -401,28 +450,28 @@ def plot_sPODframes(q_test, q1_spod_frame, q2_spod_frame, q3_spod_frame, qtilde,
     im = axs[0].pcolormesh(Xgrid, Tgrid, qtilde, vmin=qmin, vmax=qmax, cmap=cmap)
     # axs[0].axis('off')
     axs[0].axis('auto')
-    axs[0].set_xlabel(r"$Q$")
+    # axs[0].set_xlabel(r"$Q$")
     axs[0].set_yticks([], [])
     axs[0].set_xticks([], [])
     # 1. frame
     axs[1].pcolormesh(Xgrid, Tgrid, q1_spod_frame, vmin=qmin, vmax=qmax, cmap=cmap)
     # axs[1].axis('off')
     axs[1].axis('auto')
-    axs[1].set_xlabel(r"$T^{\Delta^1}Q^1$")
+    # axs[1].set_xlabel(r"$T^{Z^1}Q^1$")
     axs[1].set_yticks([], [])
     axs[1].set_xticks([], [])
     # 2. frame
     axs[2].pcolormesh(Xgrid, Tgrid, q2_spod_frame, vmin=qmin, vmax=qmax, cmap=cmap)
     # axs[2].axis('off')
     axs[2].axis('auto')
-    axs[2].set_xlabel(r"$T^{\Delta^2}Q^2$")
+    # axs[2].set_xlabel(r"$T^{Z^2}Q^2$")
     axs[2].set_yticks([], [])
     axs[2].set_xticks([], [])
     # 3. frame
     axs[3].pcolormesh(Xgrid, Tgrid, q3_spod_frame, vmin=qmin, vmax=qmax, cmap=cmap)
     # axs[3].axis('off')
     axs[3].axis('auto')
-    axs[3].set_xlabel(r"$T^{\Delta^3}Q^3$")
+    # axs[3].set_xlabel(r"$T^{Z^3}Q^3$")
     axs[3].set_yticks([], [])
     axs[3].set_xticks([], [])
 
@@ -447,7 +496,7 @@ def plot_pred_comb(time_amplitudes_1_pred, time_amplitudes_1_test, time_amplitud
     axs[0, 0].plot(t, time_amplitudes_1_pred[0, :Nt], color="red", linestyle='--', label='sPOD-NN')
     axs[0, 0].plot(t, TA_interpolated[0][0, :Nt], color="blue", linestyle='--', label='sPOD-I')
     axs[0, 0].set_xticks([0, t[-1] / 2, t[-1]])
-    axs[0, 0].set_ylabel(r"$a_i^{k}(t,\mu)$")
+    axs[0, 0].set_ylabel(r"time amplitude")
     # axs[0, 0].set_title(r'${mode}^{(' + str(1) + ')}$')
     axs[0, 0].set_xticklabels([r"$0s$", r"$1000s$", r"$2000s$"])
     axs[0, 0].set_xlabel(r"(a)")
@@ -469,7 +518,7 @@ def plot_pred_comb(time_amplitudes_1_pred, time_amplitudes_1_test, time_amplitud
     axs[1, 0].plot(t, shifts_1_pred.flatten()[:Nt], color="red", linestyle='--', label='sPOD-NN')
     axs[1, 0].plot(t, delta_pred_frame_wise[0][:Nt], color="blue", linestyle='--', label='sPOD-I')
     axs[1, 0].set_xticks([0, t[-1] / 2, t[-1]])
-    axs[1, 0].set_ylabel(r"shifts $\underline{\Delta}^k$")
+    axs[1, 0].set_ylabel(r"shifts")
     # axs[1, 0].set_title(r"$\Delta$")
     axs[1, 0].set_xticklabels([r"$0s$", r"$1000s$", r"$2000s$"])
     axs[1, 0].set_xlabel(r"(c)")
@@ -490,7 +539,7 @@ def plot_pred_comb(time_amplitudes_1_pred, time_amplitudes_1_test, time_amplitud
     axs[2, 0].plot(t, TA_POD_TEST[0, :], color="green", linestyle='-', label='actual')
     axs[2, 0].plot(t, POD_frame_amplitudes_predicted[0, :], color="black", linestyle='--', label='POD-NN')
     axs[2, 0].set_xticks([0, t[-1] / 2, t[-1]])
-    axs[2, 0].set_ylabel(r"$a_i(t,\mu)$")
+    axs[2, 0].set_ylabel(r"time amplitude")
     axs[2, 0].set_xticklabels(["0s", r"$1000s$", r"$2000s$"])
     axs[2, 0].legend(loc='lower right')
     axs[2, 0].set_xlabel(r"(e)")
@@ -562,8 +611,6 @@ def plot_recons_snapshot_cross_section(q_test, Q_recon_interp, Q_recon_sPOD, Q_r
     axin2.set_xticks([], [])
     axin2.set_yticks([], [])
     ax4.indicate_inset_zoom(axin2)
-    # axs[1].set_yticks([], [])
-    # axs[1].set_xticks([], [])
     ax4.set_title(r"$t=1190 s$")
 
     ax4.grid()
@@ -583,13 +630,11 @@ def plot_recons_snapshot_cross_section(q_test, Q_recon_interp, Q_recon_sPOD, Q_r
     axin.set_xticks([], [])
     axin.set_yticks([], [])
     ax5.indicate_inset_zoom(axin)
-    # axs[2].set_yticks([], [])
-    # axs[2].set_xticks([], [])
     ax5.set_title(r"$t=23 s$")
     ax5.grid()
-    ax5.legend(loc='upper left')
+    ax5.legend(loc='lower left')
 
-    subfig_b.supylabel(r"$T$")
+    subfig_b.supylabel(r"$S$")
     subfig_b.supxlabel(r"space $x$")
 
     fig.savefig(impath + "T_x_cross_section" + ".png", dpi=300, transparent=True)

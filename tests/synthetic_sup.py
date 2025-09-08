@@ -282,6 +282,35 @@ class synthetic_sup:
         print("Relative reconstruction error indicator for full snapshot (sPOD-I) is {}".format(num3 / den3))
         print("Relative reconstruction error indicator for full snapshot (POD-NN) is {}".format(num2 / den2))
 
+
+        num1 = np.linalg.norm(self.q_test - q_sPOD_recon, ord=1)
+        den1 = np.linalg.norm(self.q_test, ord=1)
+
+        num2 = np.linalg.norm(self.q_test - q_POD_recon, ord=1)
+        den2 = np.linalg.norm(self.q_test, ord=1)
+
+        num3 = np.linalg.norm(self.q_test - q_interp, ord=1)
+        den3 = np.linalg.norm(self.q_test, ord=1)
+
+        print('Check 4...')
+        print("Relative L1 reconstruction error indicator for full snapshot (sPOD-NN) is {}".format(num1 / den1))
+        print("Relative L1 reconstruction error indicator for full snapshot (sPOD-I) is {}".format(num3 / den3))
+        print("Relative L1 reconstruction error indicator for full snapshot (POD-NN) is {}".format(num2 / den2))
+
+        num1 = np.linalg.norm(self.q_test - q_sPOD_recon, ord=np.inf)
+        den1 = np.linalg.norm(self.q_test, ord=np.inf)
+
+        num2 = np.linalg.norm(self.q_test - q_POD_recon, ord=np.inf)
+        den2 = np.linalg.norm(self.q_test, ord=np.inf)
+
+        num3 = np.linalg.norm(self.q_test - q_interp, ord=np.inf)
+        den3 = np.linalg.norm(self.q_test, ord=np.inf)
+
+        print('Check 5...')
+        print("Relative L-inf reconstruction error indicator for full snapshot (sPOD-NN) is {}".format(num1 / den1))
+        print("Relative L-inf reconstruction error indicator for full snapshot (sPOD-I) is {}".format(num3 / den3))
+        print("Relative L-inf reconstruction error indicator for full snapshot (POD-NN) is {}".format(num2 / den2))
+
         if test_type['typeOfTest'] != "query":
             one = self.q_test - q_sPOD_recon
             num1 = np.sqrt(np.einsum('ij,ij->j', one, one))
@@ -297,9 +326,30 @@ class synthetic_sup:
             rel_err_POD = num2 / den1
             rel_err_interp = num3 / den1
 
+            # compute pointwise (spatial) errors: shape = (n_space, Nt)
+            one = self.q_test - q_sPOD_recon
+            two = self.q_test - q_POD_recon
+            three = self.q_test - q_interp
+
+            # L-infinity norm per snapshot (over spatial index)
+            num1 = np.max(np.abs(one), axis=0)  # shape (Nt,)
+            num2 = np.max(np.abs(two), axis=0)
+            num3 = np.max(np.abs(three), axis=0)
+
+            # true-solution peak per snapshot
+            den = np.max(np.abs(self.q_test), axis=0)  # shape (Nt,)
+
+            # relative L-infinity error per snapshot
+            eps = 1e-16
+            rel_err_sPOD_inf = num1 / (den + eps)
+            rel_err_POD_inf = num2 / (den + eps)
+            rel_err_interp_inf = num3 / (den + eps)
+
             errors = [rel_err_sPOD, rel_err_POD, rel_err_interp]
+            errors_inf = [rel_err_sPOD_inf, rel_err_POD_inf, rel_err_interp_inf]
         else:
             errors = [np.zeros(self.Nt), np.zeros(self.Nt), np.zeros(self.Nt)]
+            errors_inf = [np.zeros(self.Nt), np.zeros(self.Nt), np.zeros(self.Nt)]
 
 
         if plot_online:
@@ -309,7 +359,7 @@ class synthetic_sup:
                                                  shifts_sPOD_pred_2, DELTA_PRED_FRAME_WISE)
             self.plot_recons_snapshot(q_sPOD_recon, q_POD_recon, q_interp)
 
-        return errors
+        return errors, errors_inf
 
     def plot_FOM_data(self, q_train, q1_train, q2_train, Nsamples_train):
         Nx = self.Nx
@@ -418,7 +468,7 @@ class synthetic_sup:
         ax3.set_xlabel(r"(c)")
         ax3.grid()
 
-        subfig_t.supylabel(r"$a_i^{k}(t,\mu)$")
+        subfig_t.supylabel(r"time amplitude")
         subfig_t.supxlabel(r"time $t$")
 
         # put 2 axis in the bottom subfigure
@@ -444,7 +494,7 @@ class synthetic_sup:
         ax5.legend(loc='lower left')
 
         subfig_b.supxlabel(r"time $t$")
-        subfig_b.supylabel(r"shifts $\underline{\Delta}^k$")
+        subfig_b.supylabel(r"shifts")
 
         save_fig(filepath=impath + "time_amplitudes_shifts_newplot_predicted", figure=fig)
         fig.savefig(impath + "time_amplitudes_shifts_newplot_predicted" + ".pdf", format='pdf',

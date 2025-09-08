@@ -2,14 +2,12 @@ import time
 from Helper import *
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
-impath = "../plots/images_wildfire2D_review/"
+impath = "../plots/images_wildfire2D/"
 os.makedirs(impath, exist_ok=True)
 
-data_path = os.path.abspath(".") + '/wildfire_data/2D_review/dataType_1/'
+data_path = os.path.abspath(".") + '/wildfire_data/2D/'
 
 cmap = 'YlOrRd'
-
-
 # cmap = 'YlGn'
 
 
@@ -104,6 +102,8 @@ class wildfire2D_sup:
         qmat = np.concatenate([np.reshape(q, newshape=[-1, self.Nt]) for q in q_polar], axis=1)
         mu = np.prod(np.size(qmat, 0)) / (4 * np.sum(np.abs(qmat))) * 0.7  # 0.7 for T and 0.9 for S
         lambd = 1 / np.sqrt(np.max([self.Nx, self.Ny]))
+
+        print(mu, lambd)
 
         ret = shifted_rPCA(qmat, transform_list, nmodes_max=12, eps=1e-4, Niter=spod_iter, use_rSVD=True, mu=mu,
                            lambd=lambd)
@@ -426,6 +426,30 @@ class wildfire2D_sup:
             err_full_interp))
         print("Relative reconstruction error indicator for full snapshot (cartesian) (POD-NN): {}".format(err_full_POD))
 
+        res = Q - Q_recon_sPOD_cart
+        err_full_sPOD = np.linalg.norm(np.reshape(res, -1), ord=1) / np.linalg.norm(np.reshape(Q, -1), ord=1)
+        res = Q - Q_recon_POD_cart
+        err_full_POD = np.linalg.norm(np.reshape(res, -1), ord=1) / np.linalg.norm(np.reshape(Q, -1), ord=1)
+        res = Q - Q_recon_interp_cart
+        err_full_interp = np.linalg.norm(np.reshape(res, -1), ord=1) / np.linalg.norm(np.reshape(Q, -1), ord=1)
+
+        print('Check 5...')
+        print("Relative L1 reconstruction error indicator for full snapshot (sPOD-NN) is {}".format(err_full_sPOD))
+        print("Relative L1 reconstruction error indicator for full snapshot (sPOD-I) is {}".format(err_full_interp))
+        print("Relative L1 reconstruction error indicator for full snapshot (POD-NN) is {}".format(err_full_POD))
+
+        res = Q - Q_recon_sPOD_cart
+        err_full_sPOD = np.linalg.norm(np.reshape(res, -1), ord=np.inf) / np.linalg.norm(np.reshape(Q, -1), ord=np.inf)
+        res = Q - Q_recon_POD_cart
+        err_full_POD = np.linalg.norm(np.reshape(res, -1), ord=np.inf) / np.linalg.norm(np.reshape(Q, -1), ord=np.inf)
+        res = Q - Q_recon_interp_cart
+        err_full_interp = np.linalg.norm(np.reshape(res, -1), ord=np.inf) / np.linalg.norm(np.reshape(Q, -1), ord=np.inf)
+
+        print('Check 6...')
+        print("Relative L-inf reconstruction error indicator for full snapshot (sPOD-NN) is {}".format(err_full_sPOD))
+        print("Relative L-inf reconstruction error indicator for full snapshot (sPOD-I) is {}".format(err_full_interp))
+        print("Relative L-inf reconstruction error indicator for full snapshot (POD-NN) is {}".format(err_full_POD))
+
 
         if test_type['typeOfTest'] != "query":
             Q_diff_sPOD = np.concatenate([Q[:, :, 0, n].flatten('F') - Q_recon_sPOD_cart[:, :, 0, n].flatten('F')
@@ -445,9 +469,25 @@ class wildfire2D_sup:
             rel_err_POD_cart = num2 / den1
             rel_err_interp_cart = num3 / den1
 
+            # L-infinity numerator: the max absolute error per snapshot
+            num1 = np.max(np.abs(Q_diff_sPOD), axis=0)  # shape (Nt,)
+            num2 = np.max(np.abs(Q_diff_POD), axis=0)
+            num3 = np.max(np.abs(Q_diff_interp), axis=0)
+
+            # L-infinity denominator: the peak of the true solution per snapshot
+            den = np.max(np.abs(Q_act), axis=0)  # shape (Nt,)
+
+            # Relative L-infinity error per snapshot, with tiny epsilon to avoid div-by-zero
+            eps = 1e-16
+            rel_err_sPOD_cart_inf = num1 / (den + eps)
+            rel_err_POD_cart_inf = num2 / (den + eps)
+            rel_err_interp_cart_inf = num3 / (den + eps)
+
             errors = [rel_err_sPOD_cart, rel_err_POD_cart, rel_err_interp_cart]
+            errors_inf = [rel_err_sPOD_cart_inf, rel_err_POD_cart_inf, rel_err_interp_cart_inf]
         else:
             errors = [np.zeros(self.Nt), np.zeros(self.Nt), np.zeros(self.Nt)]
+            errors_inf = [np.zeros(self.Nt), np.zeros(self.Nt), np.zeros(self.Nt)]
 
         if plot_online:
             # Plot the online prediction data
@@ -470,7 +510,7 @@ class wildfire2D_sup:
         print(
             f"Time consumption in converting from cart-polar-cart  : {(2 * (toc_sPOD_cart - tic_sPOD_cart)):0.4f} seconds")
 
-        return Q_recon_sPOD_cart, Q_recon_POD_cart, Q_recon_interp_cart, errors
+        return Q_recon_sPOD_cart, Q_recon_POD_cart, Q_recon_interp_cart, errors, errors_inf
 
     def plot_recon(self, Q_recon_sPOD_cart, Q_recon_POD_cart, Q_recon_interp_cart, t_a=10, t_b=100, var_name="T"):
         q = np.reshape(self.q_test, newshape=[self.Nx, self.Ny, 1, self.Nt], order="F")
@@ -601,7 +641,7 @@ def plot_pred_comb(time_amplitudes_1_pred, time_amplitudes_1_test, time_amplitud
     ax1.plot(t, time_amplitudes_1_pred[0, :Nt], color="red", linestyle='--', label='sPOD-NN')
     ax1.plot(t, TA_interpolated[0][0, :Nt], color="blue", linestyle='--', label='sPOD-I')
     ax1.set_xticks([0, t[-1] / 2, t[-1]])
-    ax1.set_ylabel(r"$a_i^{k}(t,\mu)$")
+    ax1.set_ylabel(r"time amplitude")
     ax1.set_xticklabels([r"$0s$", r"$500s$", r"$1000s$"])
     ax1.set_xlabel(r"(a)")
     ax1.grid()
@@ -619,7 +659,7 @@ def plot_pred_comb(time_amplitudes_1_pred, time_amplitudes_1_test, time_amplitud
     ax3.plot(t, TA_POD_TEST[0, :], color="green", linestyle='-', label='actual')
     ax3.plot(t, POD_frame_amplitudes_predicted[0, :], color="black", linestyle='--', label='POD-NN')
     ax3.set_xticks([0, t[-1] / 2, t[-1]])
-    ax3.set_ylabel(r"$a_i(t,\mu)$")
+    ax3.set_ylabel(r"time amplitude")
     ax3.set_xticklabels(["0s", r"$500s$", r"$1000s$"])
     ax3.set_xlabel(r"(c)")
     ax3.legend(loc='upper left')
@@ -638,7 +678,7 @@ def plot_pred_comb(time_amplitudes_1_pred, time_amplitudes_1_test, time_amplitud
     ax5.plot(t, shifts_interp[0][0][:Nt], color="blue", linestyle='--', label='sPOD-I')
     ax5.set_xticks([0, t[-1] / 2, t[-1]])
     ax5.set_xticklabels([r"$0s$", r"$500s$", r"$1000s$"])
-    ax5.set_ylabel(r"shifts $\underline{\Delta}^k$")
+    ax5.set_ylabel(r"shift")
     ax5.set_xlabel(r"(e)")
     ax5.grid()
     ax5.legend(loc='upper right')
